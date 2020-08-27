@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-from typing import Dict, List
+from typing import Dict
 
 from mlagents_envs.environment import UnityEnvironment
 
@@ -15,9 +15,8 @@ from torch.utils.tensorboard import SummaryWriter
 from ActionFlattener import ActionFlattener
 from ReplayBuffer import ReplayBuffer, PrioritizedReplayBuffer
 
-
-flatten = lambda l: [item for sublist in l for item in sublist]
-
+def flatten(input):
+    return [item for sublist in input for item in sublist]
 
 
 class NoisyLinear(nn.Module):
@@ -100,6 +99,7 @@ class NoisyLinear(nn.Module):
 
         return x.sign().mul(x.abs().sqrt())
 
+
 class Network(nn.Module):
     def __init__(
             self,
@@ -160,6 +160,7 @@ class Network(nn.Module):
         self.value_hidden_layer.reset_noise()
         self.value_layer.reset_noise()
 
+
 class DQN_Meta_Learner:
     """DQN Agent interacting with environment.
 
@@ -189,13 +190,14 @@ class DQN_Meta_Learner:
             gamma: float = 0.99,
             update_period: int = 5000,
             # PER parameters
-            alpha: float = 0.2,
-            beta: float = 0.6,
+            alpha: float = 0.7,
+            beta: float = 0.5,
             prior_eps: float = 1e-6,
             # Categorical DQN parameters
+
             # N-step Learning
             writer: SummaryWriter = None,
-            run_id : str = r"\DQN_Rainbow",
+            run_id: str = r"\DQN_Rainbow",
             decision_requester: int = 5,
     ):
         """Initialization.
@@ -241,9 +243,9 @@ class DQN_Meta_Learner:
             branches = self.env.behavior_specs[brain_name].discrete_action_branches
             self.flattener = ActionFlattener(branches)
             self.action_space = self.flattener.action_space
-            print("Action space: " +str(self.action_space))
+            print("Action space: " + str(self.action_space))
             for shape in self.env.behavior_specs[brain_name].observation_shapes:
-                if(len(shape) == 1):
+                if (len(shape) == 1):
                     result += shape[0]
         self.obs_dim = result
         print("Obs space: " + str(result))
@@ -259,7 +261,8 @@ class DQN_Meta_Learner:
 
         return selected_action
 
-    def init_network_and_optim(self, obs_dim, flattener: ActionFlattener,learning_rate=0.001, v_max: int = 13, v_min: int = -13, atom_size: int=51):
+    def init_network_and_optim(self, obs_dim, flattener: ActionFlattener, learning_rate=0.001, v_max: int = 13,
+                               v_min: int = -13, atom_size: int = 51):
         self.obs_dim = obs_dim
         self.flattener = flattener
         # Categorical DQN parameters
@@ -283,27 +286,27 @@ class DQN_Meta_Learner:
         self.dqn_target.eval()
         self.optimizer = optim.Adam(self.dqn.parameters(), lr=learning_rate)
 
-
     def step_env(self, env: UnityEnvironment, actions: np.array):
         agents_transitions = {}
         for brain in env.behavior_specs:
-            actions = np.resize(actions,(len(env.get_steps(brain)[0]), len(env.behavior_specs[brain].discrete_action_branches)))
+            actions = np.resize(actions,
+                                (len(env.get_steps(brain)[0]), len(env.behavior_specs[brain].discrete_action_branches)))
             self.env.set_actions(brain, actions)
             self.env.step()
             decision_steps, terminal_steps = env.get_steps(brain)
 
             for agent_id_decisions in decision_steps:
-                agents_transitions[agent_id_decisions] = [decision_steps[agent_id_decisions].obs, decision_steps[agent_id_decisions].reward, False]
+                agents_transitions[agent_id_decisions] = [decision_steps[agent_id_decisions].obs,
+                                                          decision_steps[agent_id_decisions].reward, False]
 
             for agent_id_terminated in terminal_steps:
                 agents_transitions[agent_id_terminated] = [terminal_steps[agent_id_terminated].obs,
-                                                               terminal_steps[agent_id_terminated].reward, True]
+                                                           terminal_steps[agent_id_terminated].reward, True]
 
         return agents_transitions
 
     def calc_loss(self, memory, memory_n, n_step: int = 1) -> torch.Tensor:
         use_n_step = True if n_step > 1 else False
-
 
         samples = memory.sample_batch(self.beta)
         weights = torch.FloatTensor(
@@ -339,36 +342,8 @@ class DQN_Meta_Learner:
         self.dqn.reset_noise()
         self.dqn_target.reset_noise()
 
-
-    # def create_replay_buffer(self, trajectories: List, n_step: int, memory_size: int, batch_size: int):
-    #     use_n_step = True if n_step > 1 else False
-    #     obs_buf, acts_buf, rews_buf, n_obs_buf, done_buf = trajectories
-    #
-    #     memory = PrioritizedReplayBuffer(
-    #         self.obs_dim, 1,memory_size, batch_size, alpha=self.alpha
-    #     )
-    #     memory_n = ReplayBuffer(
-    #         self.obs_dim, 1, memory_size, batch_size, n_step=n_step, gamma=self.gamma
-    #     )
-    #
-    #     for ptr in range(len(acts_buf)):
-    #         transition = []
-    #         transition.append(obs_buf[ptr])
-    #         transition.append(acts_buf[ptr])
-    #         transition.append(rews_buf[ptr]- np.mean(rews_buf) /(np.std(rews_buf) + 1e-10)) # Normalize rewards
-    #         transition.append(n_obs_buf[ptr])
-    #         transition.append(done_buf[ptr])
-    #         if use_n_step:
-    #             one_step_transition = memory_n.store(*transition)
-    #         else:
-    #             one_step_transition = transition
-    #         if one_step_transition:
-    #             memory.store(*one_step_transition)
-    #
-    #     return memory, memory_n
-
-    def generate_and_fill_buffer(self, buffer_size, n_step, batch_size, task,max_trajectory_length = 600):
-        if(buffer_size <= batch_size):
+    def generate_and_fill_buffer(self, buffer_size, n_step, batch_size, task, max_trajectory_length=600):
+        if (buffer_size <= batch_size):
             raise ValueError
         start_time = time.time()
         env = self.env
@@ -411,8 +386,8 @@ class DQN_Meta_Learner:
                 action = self.select_action(init_state)
                 actions[agent_id_terminated] = action
                 experiences[agent_id_terminated][0] = init_state
-                transitions[agent_id_decisions]['obs_buf'][0] = init_state
-                transitions[agent_id_decisions]['acts_buf'][0] = action
+                transitions[agent_id_terminated]['obs_buf'][0] = init_state
+                transitions[agent_id_terminated]['acts_buf'][0] = action
 
         obs_buf = np.zeros([buffer_size, self.obs_dim], dtype=np.float32)
         n_obs_buf = np.zeros([buffer_size, self.obs_dim], dtype=np.float32)
@@ -441,6 +416,8 @@ class DQN_Meta_Learner:
             actions = np.zeros((num_agents, 1))
 
             for agent_id in next_experiences:
+                if buffer_length >= buffer_size:
+                    break
                 reward = next_experiences[agent_id][1]  # Reward
                 next_obs = flatten(next_experiences[agent_id][0])  # Next_obs
                 done = next_experiences[agent_id][2]  # Done
@@ -465,14 +442,15 @@ class DQN_Meta_Learner:
                     actions[agent_id] = next_action
                     rewards.append(sum(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1]))
                     trajectory_lengths.append(agent_ptr[agent_id])
-                    for i in range(agent_ptr[agent_id] + 1): # For every experiences store it in buffer
-                        if(i + buffer_length >= buffer_size):
+                    for i in range(agent_ptr[agent_id] + 1):  # For every experiences store it in buffer
+                        if (i + buffer_length >= buffer_size):
                             break
                         obs_buf[i + buffer_length] = transitions[agent_id]['obs_buf'][i]
                         acts_buf[i + buffer_length] = transitions[agent_id]['acts_buf'][i]
                         rews_buf[i + buffer_length] = transitions[agent_id]['rews_buf'][i]
                         n_obs_buf[i + buffer_length] = transitions[agent_id]['n_obs_buf'][i]
                         done_buf[i + buffer_length] = transitions[agent_id]['done_buf'][i]
+
                     buffer_length += agent_ptr[agent_id] + 1
 
                     transitions[agent_id]['obs_buf'] = np.zeros(
@@ -489,24 +467,20 @@ class DQN_Meta_Learner:
             first_iteration = False
 
         self.writer.add_scalar('Task: ' + str(task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
-        self.writer.add_scalar('Task: ' + str(task) + '/Mean Episode Length', np.mean(trajectory_lengths), self.meta_step)
+        self.writer.add_scalar('Task: ' + str(task) + '/Mean Episode Length', np.mean(trajectory_lengths),
+                               self.meta_step)
 
         use_n_step = True if n_step > 1 else False
 
+        acion_dim = 1
         memory = PrioritizedReplayBuffer(
-            self.obs_dim, buffer_size, batch_size, n_step=n_step,alpha=self.alpha
+            self.obs_dim, buffer_size, acion_dim, batch_size, n_step=n_step, alpha=self.alpha
         )
         memory_n = ReplayBuffer(
-            self.obs_dim, buffer_size, batch_size, n_step=n_step, gamma=self.gamma
+            self.obs_dim, buffer_size, acion_dim, batch_size, n_step=n_step, gamma=self.gamma
         )
-
-        for ptr in range(len(acts_buf)):
-            transition = []
-            transition.append(obs_buf[ptr])
-            transition.append(acts_buf[ptr])
-            transition.append(rews_buf[ptr])
-            transition.append(n_obs_buf[ptr])
-            transition.append(done_buf[ptr])
+        for ptr in range(len(rews_buf)):
+            transition = [obs_buf[ptr], acts_buf[ptr], rews_buf[ptr], n_obs_buf[ptr], done_buf[ptr]]
             if use_n_step:
                 one_step_transition = memory_n.store(*transition)
             else:
@@ -514,11 +488,13 @@ class DQN_Meta_Learner:
             if one_step_transition:
                 memory.store(*one_step_transition)
 
-        print("Finished generating Buffer with of size: {} in {:.3f}s!".format(len(memory), time.time() - start_time))
+        print("Finished generating Buffer with size of: {} in {:.3f}s!".format(len(memory), time.time() - start_time))
+        # Memory = PER
+        # Memory_n = Replay
         return memory, memory_n, buffer_size
 
-
-    def generate_trajectories(self, env: UnityEnvironment, num_trajectories: int, max_trajectory_length: int = 600) -> tuple:
+    def generate_trajectories(self, env: UnityEnvironment, num_trajectories: int,
+                              max_trajectory_length: int = 600) -> tuple:
         """
         :param env: Unity environment which creates the trajectories
         :param num_trajectories: Number of trajectories to create
@@ -536,14 +512,16 @@ class DQN_Meta_Learner:
             decision_steps, terminal_steps = env.get_steps(brain)
             num_agents = len(decision_steps)
             actions = np.zeros((num_agents, 1))
-            print("Brain :" + str(brain) +" with " + str(num_agents) + " agents detected.")
-            agent_ptr = [0 for _ in range(num_agents)] # Create pointer for agent transitions
+            print("Brain :" + str(brain) + " with " + str(num_agents) + " agents detected.")
+            agent_ptr = [0 for _ in range(num_agents)]  # Create pointer for agent transitions
 
             for i in range(num_agents):
                 experiences[i] = [[], 0, 0, [], False]
-                transitions[i] = {'obs_buf' : np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32), 'n_obs_buf' : np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32),
-                    'acts_buf' : np.zeros([max_trajectory_length], dtype=np.float32), 'rews_buf' : np.zeros([max_trajectory_length], dtype=np.float32), 'done_buf' : np.zeros([max_trajectory_length], dtype=np.float32) }
-
+                transitions[i] = {'obs_buf': np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32),
+                                  'n_obs_buf': np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32),
+                                  'acts_buf': np.zeros([max_trajectory_length], dtype=np.float32),
+                                  'rews_buf': np.zeros([max_trajectory_length], dtype=np.float32),
+                                  'done_buf': np.zeros([max_trajectory_length], dtype=np.float32)}
 
             for agent_id_decisions in decision_steps:
                 init_state = decision_steps[agent_id_decisions].obs
@@ -563,13 +541,11 @@ class DQN_Meta_Learner:
                 transitions[agent_id_decisions]['obs_buf'][0] = init_state
                 transitions[agent_id_decisions]['acts_buf'][0] = action
 
-
-
-        obs_buf = np.zeros([num_trajectories*max_trajectory_length, self.obs_dim], dtype=np.float32)
-        n_obs_buf = np.zeros([num_trajectories*max_trajectory_length, self.obs_dim], dtype=np.float32)
-        acts_buf = np.zeros([num_trajectories*max_trajectory_length], dtype=np.float32)
-        rews_buf = np.zeros([num_trajectories*max_trajectory_length], dtype=np.float32)
-        done_buf = np.zeros(num_trajectories*max_trajectory_length, dtype=np.float32)
+        obs_buf = np.zeros([num_trajectories * max_trajectory_length, self.obs_dim], dtype=np.float32)
+        n_obs_buf = np.zeros([num_trajectories * max_trajectory_length, self.obs_dim], dtype=np.float32)
+        acts_buf = np.zeros([num_trajectories * max_trajectory_length], dtype=np.float32)
+        rews_buf = np.zeros([num_trajectories * max_trajectory_length], dtype=np.float32)
+        done_buf = np.zeros(num_trajectories * max_trajectory_length, dtype=np.float32)
 
         finished_trajectories = 0
         first_iteration = True
@@ -599,34 +575,34 @@ class DQN_Meta_Learner:
                 experiences[agent_id][2] = reward
                 experiences[agent_id][3] = next_obs
                 experiences[agent_id][4] = done
-                # Store trajectory of every Agent {Agent0:[obs,act,rew,n_obs,done,obs,act,rew,n_obs,done,.... Agent1: ....}
+                # Store trajectory of every Agent {Agent0:[obs,act,rew,n_obs,done,obs,act,rew,n_obs,done,.... Agent1: .}
                 transitions[agent_id]['rews_buf'][agent_ptr[agent_id]] = reward
                 transitions[agent_id]['n_obs_buf'][agent_ptr[agent_id]] = next_obs
                 transitions[agent_id]['done_buf'][agent_ptr[agent_id]] = done
 
-
                 if not done:  # If the corresponding agent is not done yet, select and action and continue
                     agent_ptr[agent_id] += 1
                     transitions[agent_id]['obs_buf'][agent_ptr[agent_id]] = next_obs
-                    next_action = int(self.select_action(next_obs)) # Action of next step
+                    next_action = int(self.select_action(next_obs))  # Action of next step
                     actions[agent_id] = next_action
                     transitions[agent_id]['acts_buf'][agent_ptr[agent_id]] = next_action
-                else:                               # If the corresponding agent is done, store the trajectory into obs_buf, rews_buf...
-                    finished_trajectories += 1 # 1 trajectory is finished
+                else:  # If the corresponding agent is done, store the trajectory into obs_buf, rews_buf...
+                    finished_trajectories += 1  # 1 trajectory is finished
                     next_action = int(self.select_action(next_obs))
                     actions[agent_id] = next_action
-                    for i in range(agent_ptr[agent_id]+1):
-                        obs_buf[i+trajectory_length] = transitions[agent_id]['obs_buf'][i]
-                        acts_buf[i+trajectory_length] = transitions[agent_id]['acts_buf'][i]
-                        rews_buf[i+trajectory_length] = transitions[agent_id]['rews_buf'][i]
-                        n_obs_buf[i+trajectory_length] = transitions[agent_id]['n_obs_buf'][i]
-                        done_buf[i+trajectory_length] = transitions[agent_id]['done_buf'][i]
-                    trajectory_length += agent_ptr[agent_id]+1
+                    for i in range(agent_ptr[agent_id] + 1):
+                        obs_buf[i + trajectory_length] = transitions[agent_id]['obs_buf'][i]
+                        acts_buf[i + trajectory_length] = transitions[agent_id]['acts_buf'][i]
+                        rews_buf[i + trajectory_length] = transitions[agent_id]['rews_buf'][i]
+                        n_obs_buf[i + trajectory_length] = transitions[agent_id]['n_obs_buf'][i]
+                        done_buf[i + trajectory_length] = transitions[agent_id]['done_buf'][i]
+                    trajectory_length += agent_ptr[agent_id] + 1
 
                     transitions[agent_id]['obs_buf'] = np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32)
                     transitions[agent_id]['acts_buf'] = np.zeros([max_trajectory_length], dtype=np.float32)
                     transitions[agent_id]['rews_buf'] = np.zeros([max_trajectory_length], dtype=np.float32)
-                    transitions[agent_id]['n_obs_buf'] = np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32)
+                    transitions[agent_id]['n_obs_buf'] = np.zeros([max_trajectory_length, self.obs_dim],
+                                                                  dtype=np.float32)
                     transitions[agent_id]['done_buf'] = np.zeros([max_trajectory_length], dtype=np.float32)
                     agent_ptr[agent_id] = 0
             first_iteration = False
@@ -636,9 +612,11 @@ class DQN_Meta_Learner:
         rews_buf = rews_buf[:trajectory_length]
         n_obs_buf = n_obs_buf[:trajectory_length]
         done_buf = done_buf[:trajectory_length]
-        print("Finished generating {} trajectories with {} experiences in {:.3f}s!".format(finished_trajectories,trajectory_length, time.time()-start_time))
+        print("Finished generating {} trajectories with {} experiences in {:.3f}s!".format(finished_trajectories,
+                                                                                           trajectory_length,
+                                                                                           time.time() - start_time))
 
-        return (obs_buf, acts_buf, rews_buf, n_obs_buf, done_buf) , trajectory_length
+        return (obs_buf, acts_buf, rews_buf, n_obs_buf, done_buf), trajectory_length
 
     def eval_policy(self, num_trajectories, max_trajectory_length, task):
         print("Evaluating on {} trajectories.".format(num_trajectories))
@@ -651,7 +629,6 @@ class DQN_Meta_Learner:
             num_agents = len(decision_steps)
             actions = np.zeros((num_agents, 1))
             agent_ptr = [0 for _ in range(num_agents)]  # Create pointer for agent transitions
-
 
             for i in range(num_agents):
                 transitions[i] = {'rews_buf': np.zeros([max_trajectory_length], dtype=np.float32)}
@@ -699,8 +676,8 @@ class DQN_Meta_Learner:
                     agent_ptr[agent_id] = 0
                     rewards.append(reward)
 
-        print("Mean evaluated reward: " + str(np.mean(rewards)) +" for task: " + str(task))
-        self.writer.add_scalar('Task: '+str(task)+ '/Cumulative Reward', np.mean(rewards), self.meta_step)
+        print("Mean evaluated reward: " + str(np.mean(rewards)) + " for task: " + str(task))
+        self.writer.add_scalar('Task: ' + str(task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
 
     def _compute_dqn_loss(self, samples: Dict[str, np.ndarray], gamma: float) -> torch.Tensor:
         """Return categorical dqn loss."""

@@ -214,7 +214,7 @@ writer = SummaryWriter("C:/Users/Sebastian/Desktop/RLUnity/Training/results" + r
 np.set_printoptions(suppress=True, threshold=np.inf)
 dqn_module = DQN_Meta_Learner(device=device, writer=writer)
 meta_learner = MetaLearner(dqn_module, writer, tasks, enable_curiosity=True, meta_lr=1)
-meta_learner.start_meta_learning('reptile', num_meta_updates=100, buffer_size=2000, max_trajectory_length=550, n_step=128, batch_size=512, epochs=3)
+meta_learner.start_meta_learning('reptile', num_meta_updates=100, buffer_size=2000, max_trajectory_length=550, n_step=64, batch_size=512, epochs=3)
 #
 # writer = SummaryWriter("C:/Users/Sebastian/Desktop/RLUnity/Training/results" + r"/Meta_Learning1")
 # dqn_module = DQN_Meta_Learner(device=device, writer=writer)

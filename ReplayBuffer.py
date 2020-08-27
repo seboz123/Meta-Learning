@@ -13,13 +13,14 @@ class ReplayBuffer:
             self,
             obs_dim: int,
             size: int,
+            action_dim: int = 1,
             batch_size: int = 32,
             n_step: int = 1,
             gamma: float = 0.99
     ):
         self.obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
         self.next_obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
-        self.acts_buf = np.zeros([size], dtype=np.float32)
+        self.acts_buf = np.zeros([size], dtype=np.float32) if action_dim == 1 else np.zeros([size, action_dim], dtype=np.float32)
         self.rews_buf = np.zeros([size], dtype=np.float32)
         self.done_buf = np.zeros(size, dtype=np.float32)
         self.max_size, self.batch_size = size, batch_size
@@ -71,7 +72,7 @@ class ReplayBuffer:
             rews=self.rews_buf[idxs],
             done=self.done_buf[idxs],
             # for N-step Learning
-            indices=self.indices,
+            indices=idxs,
         )
 
     def sample_batch_from_idxs(
@@ -123,8 +124,9 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             self,
             obs_dim: int,
             size: int,
+            action_dim: int = 1,
             batch_size: int = 32,
-            alpha: float = 0.6,
+            alpha: float = 0.7,
             n_step: int = 1,
             gamma: float = 0.99,
     ):
@@ -132,7 +134,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         assert alpha >= 0
 
         super(PrioritizedReplayBuffer, self).__init__(
-            obs_dim, size, batch_size, n_step, gamma
+            obs_dim, size, action_dim, batch_size, n_step, gamma
         )
         self.max_priority, self.tree_ptr = 1.0, 0
         self.alpha = alpha
@@ -163,7 +165,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
         return transition
 
-    def sample_batch(self, batch_size: int, beta: float = 0.4) -> Dict[str, np.ndarray]:
+    def sample_batch(self, batch_size: int, beta: float = 0.5) -> Dict[str, np.ndarray]:
         """Sample a batch of experiences."""
         assert len(self) >= batch_size
         assert beta > 0
