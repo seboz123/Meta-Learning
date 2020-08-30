@@ -16,15 +16,18 @@ class ReplayBuffer:
             action_dim: int = 1,
             batch_size: int = 32,
             n_step: int = 1,
-            gamma: float = 0.99
+            gamma: float = 0.99,
     ):
         self.obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
         self.next_obs_buf = np.zeros([size, obs_dim], dtype=np.float32)
         self.acts_buf = np.zeros([size], dtype=np.float32) if action_dim == 1 else np.zeros([size, action_dim], dtype=np.float32)
         self.rews_buf = np.zeros([size], dtype=np.float32)
         self.done_buf = np.zeros(size, dtype=np.float32)
+        self.use_act_prob = False
+        self.act_prob_buf = np.zeros([size], dtype=np.float32) if action_dim == 1 else np.zeros([size, action_dim], dtype=np.float32)
         self.max_size, self.batch_size = size, batch_size
         self.ptr, self.size, = 0, 0
+
 
         # for N-step Learning
         self.n_step_buffer = collections.deque(maxlen=n_step)
@@ -38,6 +41,7 @@ class ReplayBuffer:
             rew: float,
             next_obs: np.ndarray,
             done: bool,
+            act_prob: np.ndarray = None
     ) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray, bool]:
         transition = (obs, act, rew, next_obs, done)
         self.n_step_buffer.append(transition)
@@ -57,6 +61,9 @@ class ReplayBuffer:
         self.acts_buf[self.ptr] = act
         self.rews_buf[self.ptr] = rew
         self.done_buf[self.ptr] = done
+        if act_prob is not None:
+            self.use_act_prob = True
+            self.act_prob_buf[self.ptr] = act_prob
         self.ptr = (self.ptr + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
 
@@ -64,16 +71,27 @@ class ReplayBuffer:
 
     def sample_batch(self, batch_size: int) -> Dict[str, np.ndarray]:
         idxs = np.random.choice(self.size, size=batch_size, replace=False)
-
-        return dict(
-            obs=self.obs_buf[idxs],
-            next_obs=self.next_obs_buf[idxs],
-            acts=self.acts_buf[idxs],
-            rews=self.rews_buf[idxs],
-            done=self.done_buf[idxs],
-            # for N-step Learning
-            indices=idxs,
-        )
+        if self.use_act_prob:
+            return dict(
+                obs=self.obs_buf[idxs],
+                next_obs=self.next_obs_buf[idxs],
+                acts=self.acts_buf[idxs],
+                rews=self.rews_buf[idxs],
+                done=self.done_buf[idxs],
+                act_prob=self.act_prob_buf[idxs],
+                # for N-step Learning
+                indices=idxs,
+            )
+        else:
+            return dict(
+                obs=self.obs_buf[idxs],
+                next_obs=self.next_obs_buf[idxs],
+                acts=self.acts_buf[idxs],
+                rews=self.rews_buf[idxs],
+                done=self.done_buf[idxs],
+                # for N-step Learning
+                indices=idxs,
+            )
 
     def sample_batch_from_idxs(
             self, idxs: np.ndarray

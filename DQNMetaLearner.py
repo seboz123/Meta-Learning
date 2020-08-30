@@ -353,48 +353,6 @@ class DQN_Meta_Learner:
         experiences = {}
         transitions = {}
 
-        for brain in env.behavior_specs:
-            decision_steps, terminal_steps = env.get_steps(brain)
-            num_agents = len(decision_steps)
-            actions = np.zeros((num_agents, 1))
-            print("Brain :" + str(brain) + " with " + str(num_agents) + " agents detected.")
-            agent_ptr = [0 for _ in range(num_agents)]  # Create pointer for agent transitions
-
-            for i in range(num_agents):
-                experiences[i] = [[], 0, 0, [], False]
-                transitions[i] = {'obs_buf': np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32),
-                                  'n_obs_buf': np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32),
-                                  'acts_buf': np.zeros([max_trajectory_length], dtype=np.float32),
-                                  'rews_buf': np.zeros([max_trajectory_length], dtype=np.float32),
-                                  'done_buf': np.zeros([max_trajectory_length], dtype=np.float32)}
-                # {0: {obs_buf: ,n_obs_buf: , ....}, 1: {obs_buf: ,n_obs_buf: , ....}, 2: {obs_buf: ,n_obs_buf: , ....}}
-
-                # step_counter[i] = 0
-
-            for agent_id_decisions in decision_steps:
-                init_state = decision_steps[agent_id_decisions].obs
-                init_state = flatten(init_state)
-                action = self.select_action(init_state)
-                actions[agent_id_decisions] = action
-                experiences[agent_id_decisions][0] = init_state
-                transitions[agent_id_decisions]['obs_buf'][0] = init_state
-                transitions[agent_id_decisions]['acts_buf'][0] = action
-
-            for agent_id_terminated in terminal_steps:
-                init_state = terminal_steps[agent_id_terminated].obs
-                init_state = flatten(init_state)
-                action = self.select_action(init_state)
-                actions[agent_id_terminated] = action
-                experiences[agent_id_terminated][0] = init_state
-                transitions[agent_id_terminated]['obs_buf'][0] = init_state
-                transitions[agent_id_terminated]['acts_buf'][0] = action
-
-        obs_buf = np.zeros([buffer_size, self.obs_dim], dtype=np.float32)
-        n_obs_buf = np.zeros([buffer_size, self.obs_dim], dtype=np.float32)
-        acts_buf = np.zeros([buffer_size], dtype=np.float32)
-        rews_buf = np.zeros([buffer_size], dtype=np.float32)
-        done_buf = np.zeros([buffer_size], dtype=np.float32)
-
         buffer_length = 0
         first_iteration = True
 
@@ -402,7 +360,50 @@ class DQN_Meta_Learner:
         trajectory_lengths = []
 
         while buffer_length < buffer_size:
-            if not first_iteration:
+            if first_iteration:
+                for brain in env.behavior_specs:
+                    decision_steps, terminal_steps = env.get_steps(brain)
+                    num_agents = len(decision_steps)
+                    actions = np.zeros((num_agents, 1))
+                    print("Brain :" + str(brain) + " with " + str(num_agents) + " agents detected.")
+                    agent_ptr = [0 for _ in range(num_agents)]  # Create pointer for agent transitions
+
+                    for i in range(num_agents):
+                        experiences[i] = [[], 0, 0, [], False]
+                        transitions[i] = {'obs_buf': np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32),
+                                          'n_obs_buf': np.zeros([max_trajectory_length, self.obs_dim],
+                                                                dtype=np.float32),
+                                          'acts_buf': np.zeros([max_trajectory_length], dtype=np.float32),
+                                          'rews_buf': np.zeros([max_trajectory_length], dtype=np.float32),
+                                          'done_buf': np.zeros([max_trajectory_length], dtype=np.float32)}
+                        # {0: {obs_buf: ,n_obs_buf: , ....}, 1: {obs_buf: ,n_obs_buf: , ....}, 2: {obs_buf: ,n_obs_buf: , ....}}
+
+                        # step_counter[i] = 0
+
+                    for agent_id_decisions in decision_steps:
+                        init_state = decision_steps[agent_id_decisions].obs
+                        init_state = flatten(init_state)
+                        action = self.select_action(init_state)
+                        actions[agent_id_decisions] = action
+                        experiences[agent_id_decisions][0] = init_state
+                        transitions[agent_id_decisions]['obs_buf'][0] = init_state
+                        transitions[agent_id_decisions]['acts_buf'][0] = action
+
+                    for agent_id_terminated in terminal_steps:
+                        init_state = terminal_steps[agent_id_terminated].obs
+                        init_state = flatten(init_state)
+                        action = self.select_action(init_state)
+                        actions[agent_id_terminated] = action
+                        experiences[agent_id_terminated][0] = init_state
+                        transitions[agent_id_terminated]['obs_buf'][0] = init_state
+                        transitions[agent_id_terminated]['acts_buf'][0] = action
+
+                obs_buf = np.zeros([buffer_size, self.obs_dim], dtype=np.float32)
+                n_obs_buf = np.zeros([buffer_size, self.obs_dim], dtype=np.float32)
+                acts_buf = np.zeros([buffer_size], dtype=np.float32)
+                rews_buf = np.zeros([buffer_size], dtype=np.float32)
+                done_buf = np.zeros([buffer_size], dtype=np.float32)
+            else:
                 for agent in experiences:
                     # Set Observation and Action to the last next_obs and the selected action for the observation
                     experiences[agent][0] = experiences[agent][3]  # obs = next_obs

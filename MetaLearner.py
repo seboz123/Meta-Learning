@@ -79,7 +79,7 @@ class MetaLearner():
         start_time = time.localtime()
         start_time = time.strftime("%H:%M:%S", start_time)
 
-        print("Meta Learning started at: " + start_time)
+        ("Meta Learning started at: " + start_time)
         print("Starting Meta Learning with following Hyperparameters:")
         print("Meta Steps: " + str(num_meta_updates))
         print("Buffer size: " + str(buffer_size))
