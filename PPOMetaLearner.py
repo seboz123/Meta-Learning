@@ -164,8 +164,9 @@ class PPO_Meta_Learner:
 
         return loss, elementwise_loss, indices
 
-    def init_network_and_optim(self, obs_dim, action_dim, hidden_size, learning_rate: float = 0.0003):
-
+    def init_network_and_optim(self, hidden_size: int = 256, learning_rate: float = 0.0003):
+        obs_dim = self.obs_space
+        action_dim = self.action_space
         self.actor_critic = ActorCritic(self.device,
                                         obs_dim, action_dim, hidden_size
                                         ).to(self.device)
@@ -195,10 +196,9 @@ class PPO_Meta_Learner:
         env.reset()
 
         # Create transition dict
-        experiences = {}
         transitions = {}
         rewards = []
-        trajectory_lengths = []
+        trajectory_lengths = [] # length of agent trajectories, maxlen = timehorizon/done
         episode_lengths = []
 
         buffer_length = 0
@@ -211,14 +211,14 @@ class PPO_Meta_Learner:
                 for brain in env.behavior_specs:
                     decision_steps, terminal_steps = env.get_steps(brain)
                     num_agents = len(decision_steps)
-                    episode_step = [1 for _ in range(num_agents)]
+                    episode_step = [0 for _ in range(num_agents)]
+                    current_added_reward = [0 for _ in range(num_agents)]
 
-                    actions = np.zeros((24, len(self.action_space)))
+                    actions = np.zeros((num_agents, len(self.action_space)))
                     print("Brain :" + str(brain) + " with " + str(num_agents) + " agents detected.")
                     agent_ptr = [0 for _ in range(num_agents)]  # Create pointer for agent transitions
 
                     for i in range(num_agents):
-                        experiences[i] = [[], [], 0, [], False]
                         transitions[i] = {
                             'obs_buf': np.zeros([time_horizon, self.obs_space], dtype=np.float32),
                             'n_obs_buf': np.zeros([time_horizon, self.obs_space], dtype=np.float32),
@@ -239,7 +239,6 @@ class PPO_Meta_Learner:
                         action = action.detach().cpu().numpy()
                         actions[agent_id_decisions] = action
 
-                        experiences[agent_id_decisions][0] = init_state
                         transitions[agent_id_decisions]['obs_buf'][agent_ptr[agent_id_decisions]] = init_state
                         transitions[agent_id_decisions]['acts_buf'][agent_ptr[agent_id_decisions]] = action
                         transitions[agent_id_decisions]['act_log_prob_buf'][agent_ptr[agent_id_decisions]] = action_log_prob.detach().cpu().numpy()
@@ -255,7 +254,6 @@ class PPO_Meta_Learner:
                         action = action.detach().cpu().numpy()
 
                         actions[agent_id_terminated] = action
-                        experiences[agent_id_terminated][0] = init_state
                         transitions[agent_id_terminated]['obs_buf'][agent_ptr[agent_id_terminated]] = init_state
                         transitions[agent_id_terminated]['acts_buf'][agent_ptr[agent_id_terminated]] = action
                         transitions[agent_id_terminated]['values_buf'][agent_ptr[agent_id_terminated]] = value.detach().cpu().numpy()
@@ -269,11 +267,8 @@ class PPO_Meta_Learner:
                 finished_rews_buf = np.zeros([buffer_size], dtype=np.float32)
                 finished_values_buf = np.zeros([buffer_size], dtype=np.float32)
                 finished_done_buf = np.zeros([buffer_size], dtype=np.float32)
-            else:
-                for agent in experiences:
-                    # Set Observation and Action to the last next_obs and the selected action for the observation
-                    experiences[agent][0] = experiences[agent][3]  # obs = next_obs
-                    experiences[agent][1] = actions[int(agent)]  # action = action_vector[]
+                finished_adv_buf = np.zeros([buffer_size], dtype=np.float32)
+
 
             # Step environment
             next_experiences = self.step_env(self.env, np.array(actions))
@@ -286,20 +281,17 @@ class PPO_Meta_Learner:
                 next_obs = flatten(next_experiences[agent_id][0])  # Next_obs
                 done = next_experiences[agent_id][2]  # Done
 
-                # Store 1-step-experience of every agent_id {agent_id0:[obs,act,rew,n_obs,done] agent_id1: ....}
-                experiences[agent_id][2] = reward
-                experiences[agent_id][3] = next_obs
-                experiences[agent_id][4] = done
+                current_added_reward[agent_id] += reward
+
                 # Store trajectory of every Agent {Agent0:[obs,act,rew,n_obs,done,obs,act,rew,n_obs,done,.... Agent1: ....}
                 transitions[agent_id]['rews_buf'][agent_ptr[agent_id]] = reward
                 transitions[agent_id]['n_obs_buf'][agent_ptr[agent_id]] = next_obs
                 transitions[agent_id]['done_buf'][agent_ptr[agent_id]] = done
 
+                episode_step[agent_id] += 1
                 if done or agent_ptr[agent_id] == time_horizon - 1:
                     # If the corresponding agent is done or trajectory is max length
-                    if done:
-                        episode_lengths.append(episode_step[agent_id])
-                        episode_step[agent_id] = 0
+
 
                     dist, value = self.actor_critic.act(np.array(next_obs))
 
@@ -316,8 +308,13 @@ class PPO_Meta_Learner:
                     if agent_ptr[agent_id] + buffer_length >= buffer_size:
                         buffer_finished = True
                         break
-                    trajectory_lengths.append(agent_ptr[agent_id] + 1)
+                    if done:
+                        episode_lengths.append(episode_step[agent_id])
+                        episode_step[agent_id] = 0
+                        rewards.append(current_added_reward[agent_id])
+                        current_added_reward[agent_id] = 0
 
+                    trajectory_lengths.append(agent_ptr[agent_id] + 1)
                     advantages = self.get_gae(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1],
                                               transitions[agent_id]['values_buf'][:agent_ptr[agent_id] + 1])
 
@@ -326,10 +323,10 @@ class PPO_Meta_Learner:
                         finished_acts_buf[i + buffer_length] = transitions[agent_id]['acts_buf'][i]
                         finished_rews_buf[i + buffer_length] = transitions[agent_id]['rews_buf'][i]
                         finished_values_buf[i + buffer_length] = transitions[agent_id]['values_buf'][i]
-
                         finished_next_obs_buf[i + buffer_length] = transitions[agent_id]['n_obs_buf'][i]
                         finished_done_buf[i + buffer_length] = transitions[agent_id]['done_buf'][i]
                         finished_log_probs_buf[i + buffer_length] = transitions[agent_id]['act_log_prob_buf'][i]
+                        finished_adv_buf[i + buffer_length] = advantages[i]
 
                     buffer_length += agent_ptr[agent_id] + 1
 
@@ -349,7 +346,6 @@ class PPO_Meta_Learner:
                     agent_ptr[agent_id] = 0
 
                 else:  # If the corresponding agent is not done, continue
-                    episode_step[agent_id] += 1
                     agent_ptr[agent_id] += 1
                     transitions[agent_id]['obs_buf'][agent_ptr[agent_id]] = next_obs
 
@@ -367,14 +363,14 @@ class PPO_Meta_Learner:
                     actions[agent_id] = next_action
 
             first_iteration = False
+        print(rewards)
         self.writer.add_scalar('Task: ' + str(task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
+
         self.writer.add_scalar('Task: ' + str(task) + '/Mean Episode Length', np.mean(episode_lengths),
                                self.meta_step)
 
-        print(episode_lengths, trajectory_lengths, rewards)
-
         return {'obs': finished_obs_buf[:buffer_length], 'acts': finished_acts_buf[:buffer_length],
-                'rews': finished_rews_buf[:buffer_length],
+                'rews': finished_rews_buf[:buffer_length], 'advs': finished_adv_buf[:buffer_length],
                 'n_obs': finished_next_obs_buf[:buffer_length], 'dones': finished_done_buf[:buffer_length],
                 'log_probs': finished_log_probs_buf[:buffer_length],
                 'values': finished_values_buf[:buffer_length], 'trajectory_lengths': trajectory_lengths}
@@ -394,8 +390,9 @@ env = UnityEnvironment(file_name="C:/Users/Sebastian/Desktop/RLUnity/Training/mM
                        no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
 
 ppo_module.set_environment(env)
-ppo_module.init_network_and_optim(ppo_module.obs_space, ppo_module.action_space, 3)
+ppo_module.init_network_and_optim()
 np.set_printoptions(suppress=True, threshold=np.inf)
-buffer = ppo_module.generate_and_fill_buffer(4000, 0, 512)
+buffer = ppo_module.generate_and_fill_buffer(buffer_size=40000, task=0, time_horizon=500)
+print(buffer['advs'])
 np.set_printoptions(suppress=True, threshold=np.inf)
 ppo_module.calc_loss(buffer)
