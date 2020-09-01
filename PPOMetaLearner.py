@@ -42,19 +42,6 @@ class ActorCritic(nn.Module):
     def torch_from_np(self, array: np.ndarray) -> torch.Tensor:
         return torch.as_tensor(np.asanyarray(array)).to(self.device)
 
-    def act(self, state: np.ndarray) -> (Categorical, torch.Tensor):
-        state = self.torch_from_np(state)
-        action_hidden_state = self.action_layer(state)
-        action_probs, dists = [], []
-        for layer in self.out_layers:
-            action_prob = layer(action_hidden_state)
-            dist = Categorical(action_prob)
-
-            action_probs.append(action_prob)
-            dists.append(dist)
-        value = self.value_layer(state)
-        return dists, value
-
     def get_dist_and_value(self, obs: torch.FloatTensor) -> (torch.distributions.Categorical, torch.FloatTensor):
         """
 
@@ -76,6 +63,11 @@ class ActorCritic(nn.Module):
         values = values.squeeze()
 
         return dists, values
+
+    def forward(self, obs: torch.FloatTensor) -> (torch.distributions.Categorical, torch.FloatTensor):
+        obs = self.torch_from_np(obs)
+        return self.get_dist_and_value(obs)
+
 
     def get_probs_and_entropies(self, acts: torch.FloatTensor, dists: torch.distributions.Categorical):
         log_probs = torch.zeros([acts.shape[0]]).to(self.device)
@@ -200,10 +192,9 @@ class PPO_Meta_Learner:
         return policy_loss
 
 
-    def calc_loss(self, buffer: {}, epsilon: float = 0.2) -> torch.Tensor:
+    def calc_loss(self, buffer: {}, epsilon: float = 0.2, beta: float = 0.001) -> torch.Tensor:
 
         old_log_probs = np.sum(buffer['log_probs'], axis=1) # Multiply all probs is adding all log_probs
-        old_entropies = np.sum(buffer['entropies'], axis=1)
         obs = buffer['obs']
         acts = buffer['acts']
         values = buffer['values']
@@ -222,18 +213,23 @@ class PPO_Meta_Learner:
         log_probs, entropies, values = self.evaluate_actions(obs, acts)
         value_loss = self.calc_value_loss(values, old_values, returns, eps=epsilon)
         policy_loss = self.calc_policy_loss(normalized_advantages, log_probs, old_log_probs, eps=epsilon)
-        entropy_loss = entropies.mean()
+        entropy = entropies.mean()
 
         kullback_leibler = 0.5 * torch.mean(torch.pow(log_probs-old_log_probs, 2))
+        policy_loss = policy_loss
+        value_loss = 0.5 * value_loss
+        print("Entropy: ")
+        print(entropy)
+        entropy_loss = - beta * entropy
+        print("Policy Loss :")
+        print(policy_loss)
         print("Value loss: ")
         print(value_loss)
-        print("Policy loss: ")
-        print(policy_loss)
         print("Entropy loss: ")
         print(entropy_loss)
         print("Approx KL: ")
         print(kullback_leibler)
-        loss = policy_loss + 0.5 * value_loss - epsilon * entropy_loss
+        loss = policy_loss + value_loss + entropy_loss
 
         return loss
 
@@ -265,6 +261,10 @@ class PPO_Meta_Learner:
                                                            terminal_steps[agent_id_terminated].reward, True]
 
         return agents_transitions
+
+    def split_buffer_into_batches(self, buffer, batch_size: int = 512):
+
+        pass
 
     def generate_and_fill_buffer(self, buffer_size, task, time_horizon=256) -> {}:
         env = self.env
@@ -310,7 +310,7 @@ class PPO_Meta_Learner:
                         init_state = decision_steps[agent_id_decisions].obs
                         init_state = flatten(init_state)
                         with torch.no_grad():
-                            dists, value = self.actor_critic.act(np.array(init_state))
+                            dists, value = self.actor_critic.forward(np.array(init_state))
                             action = [dist.sample() for dist in dists]
                             entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                             action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in zip(dists, action)]
@@ -325,10 +325,10 @@ class PPO_Meta_Learner:
                         transitions[agent_id_decisions]['entropies_buf'][agent_ptr[agent_id_decisions]] = entropies
 
                     for agent_id_terminated in terminal_steps:
-                        init_state = terminal_steps[agent_ptr[agent_id_terminated]].obs
+                        init_state = terminal_steps[agent_id_terminated].obs
                         init_state = flatten(init_state)
                         with torch.no_grad():
-                            dists, value = self.actor_critic.act(np.array(init_state))
+                            dists, value = self.actor_critic.forward(np.array(init_state))
                             entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                             action = [dist.sample() for dist in dists]
                             action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -378,7 +378,7 @@ class PPO_Meta_Learner:
                 if done or agent_ptr[agent_id] == time_horizon - 1:
                     # If the corresponding agent is done or trajectory is max length
                     with torch.no_grad():
-                        dists, value = self.actor_critic.act(np.array(next_obs))
+                        dists, value = self.actor_critic.forward(np.array(next_obs))
                         action = [dist.sample() for dist in dists]
                         entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                         action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -442,7 +442,7 @@ class PPO_Meta_Learner:
                     transitions[agent_id]['obs_buf'][agent_ptr[agent_id]] = next_obs
 
                     with torch.no_grad():
-                        dists, value = self.actor_critic.act(np.array(next_obs))
+                        dists, value = self.actor_critic.forward(np.array(next_obs))
                         action = [dist.sample() for dist in dists]
                         entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                         action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -485,5 +485,11 @@ env = UnityEnvironment(file_name="C:/Users/Sebastian/Desktop/RLUnity/Training/mM
 
 ppo_module.set_environment(env)
 ppo_module.init_network_and_optim()
-buffer = ppo_module.generate_and_fill_buffer(buffer_size=2000, task=0, time_horizon=500)
-loss = ppo_module.calc_loss(buffer, epsilon=0.2)
+for i in range(100):
+    buffer = ppo_module.generate_and_fill_buffer(buffer_size=2000, task=0, time_horizon=500)
+    ppo_module.split_buffer_into_batches(buffer, batch_size=512)
+    loss = ppo_module.calc_loss(buffer, epsilon=0.2, beta=0.001)
+    ppo_module.optimizer.zero_grad()
+    loss.backward()
+    ppo_module.optimizer.step()
+
