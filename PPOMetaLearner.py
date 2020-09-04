@@ -1,6 +1,5 @@
 import numpy as np
 import time
-import sys
 
 import torch
 import torch.nn as nn
@@ -117,6 +116,7 @@ class PPO_Meta_Learner:
     def set_environment(self, env):
         env.reset()
         self.env = env
+        self.task = 0
         result = 0
         for brain_name in self.env.behavior_specs:
             # Set up flattened action space
@@ -183,8 +183,7 @@ class PPO_Meta_Learner:
         value_loss = 0.5 * torch.mean(value_loss)
         return value_loss
 
-    def calc_policy_loss(self, advantages: torch.FloatTensor, log_probs: torch.FloatTensor, old_log_probs: torch.FloatTensor, eps) -> torch.FloatTensor:
-
+    def calc_policy_loss(self, advantages: torch.FloatTensor, log_probs: torch.FloatTensor, old_log_probs: torch.FloatTensor, eps: float = 0.2  ) -> torch.FloatTensor:
         ratio = torch.exp(log_probs - old_log_probs)
         tmp_loss_1 = ratio * advantages
         tmp_loss_2 = torch.clamp(ratio, 1.0 - eps, 1.0 + eps) * advantages
@@ -192,7 +191,7 @@ class PPO_Meta_Learner:
         return policy_loss
 
 
-    def calc_loss(self, buffer: {}, epsilon: float = 0.2, beta: float = 0.001) -> torch.Tensor:
+    def calc_loss(self, buffer: {}, epsilon: float = 0.2, beta: float = 0.001, lambd = 0.99) -> torch.Tensor:
 
         old_log_probs = np.sum(buffer['log_probs'], axis=1) # Multiply all probs is adding all log_probs
         obs = buffer['obs']
@@ -200,7 +199,7 @@ class PPO_Meta_Learner:
         values = buffer['values']
         rews = buffer['rews']
 
-        advantages = self.get_gae(rews, values)
+        advantages = self.get_gae(rews, values, lambd)
         normalized_advantages = (advantages - advantages.mean()) / (advantages.std() + 0.000001)
 
         returns = np.add(normalized_advantages, values)
@@ -218,20 +217,18 @@ class PPO_Meta_Learner:
         kullback_leibler = 0.5 * torch.mean(torch.pow(log_probs-old_log_probs, 2))
         policy_loss = policy_loss
         value_loss = 0.5 * value_loss
-        print("Entropy: ")
-        print(entropy)
         entropy_loss = - beta * entropy
-        print("Policy Loss :")
-        print(policy_loss)
-        print("Value loss: ")
-        print(value_loss)
-        print("Entropy loss: ")
-        print(entropy_loss)
-        print("Approx KL: ")
-        print(kullback_leibler)
+
+        # self.writer.add_scalar('Task: ' + str(self.task) + '/Entropy ', entropy.item(), self.meta_step)
+        # self.writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss ', policy_loss.item(), self.meta_step)
+        # self.writer.add_scalar('Task: ' + str(self.task) + '/Value Loss ', value_loss.item(), self.meta_step)
+        # self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', kullback_leibler.item(), self.meta_step)
+
+        # print("Entropy: {:.3f}\nLosses:  Policy: {:.3f}, Value: {:.3f}, Approx KL: {:.3f}".format(entropy.item(), policy_loss.item(), value_loss.item(), kullback_leibler.item()))
+
         loss = policy_loss + value_loss + entropy_loss
 
-        return loss
+        return loss, policy_loss.item(), value_loss.item(), entropy.item(), kullback_leibler.item()
 
     def init_network_and_optim(self, hidden_size: int = 256, learning_rate: float = 0.0003):
         obs_dim = self.obs_space
@@ -241,7 +238,11 @@ class PPO_Meta_Learner:
         self.actor_critic = ActorCritic(self.device,
                                         obs_dim, action_dim, hidden_size
                                         ).to(self.device)
+
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
+        lambda2 = lambda epoch: 0.95**epoch
+        self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda2)
+
 
     def step_env(self, env: UnityEnvironment, actions: np.array):
         agents_transitions = {}
@@ -263,10 +264,27 @@ class PPO_Meta_Learner:
         return agents_transitions
 
     def split_buffer_into_batches(self, buffer, batch_size: int = 512):
+        batches = []
+        buffer_length = len(buffer['rews'])
+        indx = np.arange(buffer_length)
+        np.random.shuffle(indx)
+        for key in buffer:
+            buffer[key] = buffer[key][indx]
 
-        pass
+        for size in range(0, buffer_length, batch_size):
+            batch = {}
+            if size+batch_size <= buffer_length:
+                for key in buffer:
+                    batch[key] = buffer[key][size:size+batch_size]
+            else:
+                for key in buffer:
+                    batch[key] = buffer[key][size:]
 
-    def generate_and_fill_buffer(self, buffer_size, task, time_horizon=256) -> {}:
+            batches.append(batch)
+        return batches
+
+    def generate_and_fill_buffer(self, buffer_size, time_horizon=256) -> {}:
+        start_time = time.time()
         env = self.env
         env.reset()
 
@@ -458,19 +476,55 @@ class PPO_Meta_Learner:
                     actions[agent_id] = next_action
 
             first_iteration = False
-        self.writer.add_scalar('Task: ' + str(task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
+        print("Current mean Reward: " + str(np.mean(rewards)))
+        print("Current mean Episode Length: " + str(np.mean(episode_lengths)))
 
-        self.writer.add_scalar('Task: ' + str(task) + '/Mean Episode Length', np.mean(episode_lengths),
+        self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
+
+        self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(episode_lengths),
                                self.meta_step)
+
+        print("Generated buffer of lenth: {} in {:.3f} secs.".format(buffer_length, time.time()-start_time))
 
         return {'obs': finished_obs_buf[:buffer_length], 'acts': finished_acts_buf[:buffer_length],
                 'rews': finished_rews_buf[:buffer_length], 'advs': finished_adv_buf[:buffer_length],
                 'n_obs': finished_next_obs_buf[:buffer_length], 'dones': finished_done_buf[:buffer_length],
                 'log_probs': finished_log_probs_buf[:buffer_length], 'entropies': finished_entropies_buf[:buffer_length],
-                'values': finished_values_buf[:buffer_length], 'trajectory_lengths': trajectory_lengths}
+                'values': finished_values_buf[:buffer_length]}, buffer_length
+
+    def train(self, env: UnityEnvironment, max_steps: int = 1000000):
+        step = 0
+        self.set_environment(env)
+        self.init_network_and_optim()
+        while step < max_steps:
+            print("Current step: " + str(step))
+            buffer, buffer_length = self.generate_and_fill_buffer(buffer_size=20000, time_horizon=512)
+            step += buffer_length
+            epochs = 3
+            p_losses , v_losses, entropies, kls = [], [], [], []
+            for i in range(epochs):
+                batches = self.split_buffer_into_batches(buffer, batch_size=512)
+                for batch in batches:
+                    loss, p_loss, v_loss, entropy, kl = self.calc_loss(batch, epsilon=0.2, beta=0.001, lambd=0.99)
+                    p_losses.append(p_loss)
+                    v_losses.append(v_loss)
+                    entropies.append(entropy)
+                    kls.append(kl)
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+            for parameter_group in ppo_module.optimizer.param_groups:
+                print("Current learning rate: {}".format(parameter_group['lr']))
+
+            self.meta_step += 1
+            self.learning_rate_scheduler.step()
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Entropy ', np.mean(entropies), self.meta_step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss ', np.mean(p_losses), self.meta_step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Value Loss ', np.mean(v_losses), self.meta_step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', np.mean(kls), self.meta_step)
 
 
-writer = SummaryWriter("C:/Users/Sebastian/Desktop/RLUnity/Training/results" + r"/Meta_Learning3")
+writer = SummaryWriter("C:/Users/Sebastian/Desktop/RLUnity/Training/results" + r"/PPO_test_3")
 
 ppo_module = PPO_Meta_Learner('cuda', writer=writer)
 
@@ -479,17 +533,9 @@ engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
 
 env_parameters_channel = EnvironmentParametersChannel()
 env_parameters_channel.set_float_parameter("seed", 5.0)
-env = UnityEnvironment(file_name="C:/Users/Sebastian/Desktop/RLUnity/Training/mMaze/RLProject",
+env = UnityEnvironment(file_name="C:/Users/Sebastian/Desktop/RLUnity/Training/mFindTarget_new/RLProject",
                        base_port=5000, timeout_wait=120,
                        no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
 
-ppo_module.set_environment(env)
-ppo_module.init_network_and_optim()
-for i in range(100):
-    buffer = ppo_module.generate_and_fill_buffer(buffer_size=2000, task=0, time_horizon=500)
-    ppo_module.split_buffer_into_batches(buffer, batch_size=512)
-    loss = ppo_module.calc_loss(buffer, epsilon=0.2, beta=0.001)
-    ppo_module.optimizer.zero_grad()
-    loss.backward()
-    ppo_module.optimizer.step()
+ppo_module.train(env, 1000000)
 
