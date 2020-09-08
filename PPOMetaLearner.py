@@ -12,6 +12,8 @@ from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
 from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
+from utils import torch_from_np
+
 flatten = lambda l: [item for sublist in l for item in sublist]
 
 
@@ -38,8 +40,6 @@ class ActorCritic(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_size, 1)
         )
-    def torch_from_np(self, array: np.ndarray) -> torch.Tensor:
-        return torch.as_tensor(np.asanyarray(array)).to(self.device)
 
     def get_dist_and_value(self, obs: torch.FloatTensor) -> (torch.distributions.Categorical, torch.FloatTensor):
         """
@@ -64,7 +64,7 @@ class ActorCritic(nn.Module):
         return dists, values
 
     def forward(self, obs: torch.FloatTensor) -> (torch.distributions.Categorical, torch.FloatTensor):
-        obs = self.torch_from_np(obs)
+        obs = torch_from_np(obs)
         return self.get_dist_and_value(obs)
 
 
@@ -158,9 +158,6 @@ class PPO_Meta_Learner:
         advantage = self.discount_rewards(r=delta_t, gamma=gamma * lambd)
         return advantage
 
-    def torch_from_np(self, array: np.ndarray) -> torch.Tensor:
-        return torch.as_tensor(np.asanyarray(array)).to(self.device)
-
     def evaluate_actions(self, obs: np.ndarray, acts: np.ndarray) -> (torch.FloatTensor, torch.FloatTensor, torch.FloatTensor):
         """
         Args:
@@ -169,8 +166,8 @@ class PPO_Meta_Learner:
 
         Returns:
         """
-        obs = self.torch_from_np(obs)
-        acts = self.torch_from_np(acts)
+        obs = torch_from_np(obs)
+        acts = torch_from_np(acts)
         dists, values = self.actor_critic.get_dist_and_value(obs)
         log_probs, entropies = self.actor_critic.get_probs_and_entropies(acts, dists) # Error here
         return log_probs, entropies, values
@@ -204,10 +201,10 @@ class PPO_Meta_Learner:
 
         returns = np.add(normalized_advantages, values)
 
-        old_values = self.torch_from_np(values)
-        old_log_probs = self.torch_from_np(old_log_probs)
-        returns = self.torch_from_np(returns)
-        normalized_advantages = self.torch_from_np(normalized_advantages)
+        old_values = torch_from_np(values)
+        old_log_probs = torch_from_np(old_log_probs)
+        returns = torch_from_np(returns)
+        normalized_advantages = torch_from_np(normalized_advantages)
 
         log_probs, entropies, values = self.evaluate_actions(obs, acts)
         value_loss = self.calc_value_loss(values, old_values, returns, eps=epsilon)
@@ -352,7 +349,6 @@ class PPO_Meta_Learner:
                             action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
                                                 zip(dists, action)]
                             action = [action_branch.detach().cpu().numpy() for action_branch in action]
-                            actions[agent_id_decisions] = action
                             value = value.detach().cpu().numpy()
 
                         actions[agent_id_terminated] = action
@@ -492,18 +488,18 @@ class PPO_Meta_Learner:
                 'log_probs': finished_log_probs_buf[:buffer_length], 'entropies': finished_entropies_buf[:buffer_length],
                 'values': finished_values_buf[:buffer_length]}, buffer_length
 
-    def train(self, env: UnityEnvironment, max_steps: int = 1000000):
+    def train(self, env: UnityEnvironment, max_steps: int = 1000000, buffer_size: int = 10000, time_horizon: int = 512, batch_size: int = 512):
         step = 0
         self.set_environment(env)
         self.init_network_and_optim()
         while step < max_steps:
             print("Current step: " + str(step))
-            buffer, buffer_length = self.generate_and_fill_buffer(buffer_size=20000, time_horizon=512)
+            buffer, buffer_length = self.generate_and_fill_buffer(buffer_size=buffer_size, time_horizon=time_horizon)
             step += buffer_length
             epochs = 3
             p_losses , v_losses, entropies, kls = [], [], [], []
             for i in range(epochs):
-                batches = self.split_buffer_into_batches(buffer, batch_size=512)
+                batches = self.split_buffer_into_batches(buffer, batch_size=batch_size)
                 for batch in batches:
                     loss, p_loss, v_loss, entropy, kl = self.calc_loss(batch, epsilon=0.2, beta=0.001, lambd=0.99)
                     p_losses.append(p_loss)
@@ -524,18 +520,18 @@ class PPO_Meta_Learner:
             self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', np.mean(kls), self.meta_step)
 
 
-writer = SummaryWriter("C:/Users/Sebastian/Desktop/RLUnity/Training/results" + r"/PPO_test_3")
+writer = SummaryWriter("results")
 
-ppo_module = PPO_Meta_Learner('cuda', writer=writer)
+ppo_module = PPO_Meta_Learner('cpu', writer=writer)
 
 engine_configuration_channel = EngineConfigurationChannel()
 engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
 
 env_parameters_channel = EnvironmentParametersChannel()
 env_parameters_channel.set_float_parameter("seed", 5.0)
-env = UnityEnvironment(file_name="C:/Users/Sebastian/Desktop/RLUnity/Training/mFindTarget_new/RLProject",
+env = UnityEnvironment(file_name="Training/Maze",
                        base_port=5000, timeout_wait=120,
                        no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
 
-ppo_module.train(env, 1000000)
+ppo_module.train(env, 1000000, buffer_size=3000)
 

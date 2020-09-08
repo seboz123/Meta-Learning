@@ -12,100 +12,60 @@ from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
 from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
+from Buffer import Buffer
+from networks import ActorCriticPolicy, PolicyValueNetwork, ValueNetwork
+from utils import torch_from_np, actions_to_onehot, break_into_branches
+
 flatten = lambda l: [item for sublist in l for item in sublist]
 
 
-class ActorCritic(nn.Module):
-    def __init__(self, device, state_dim, action_dim, hidden_size: int = 256):
-        super(ActorCritic, self).__init__()
+class Optimizer:
+    def __init__(self, obs_dim, act_dim, hidden_size, num_hidden_layers):
+        act_len = sum(act_dim)
+        self.discrete_target_entropy_scale = 0.2
+        self.init_entropy_coeff = 0.2 # Typical range: 0.05 - 0.5
 
-        self.device = device
-        # shared actor critc
-        self.hidden_state = nn.Sequential(
-            nn.Linear(state_dim, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
+        self.policy_network = ActorCriticPolicy(obs_dim, act_dim, 256) # Pi
+
+        self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers) # Q
+
+        self.target_network = ValueNetwork(obs_dim, act_len, hidden_size, num_hidden_layers) # V
+
+        self.soft_update(self.policy_network, self.target_network, 1.0)
+
+        self.log_entropy_coeff = torch.nn.Parameter(
+            torch.log(torch.as_tensor([self.init_entropy_coeff] * len(act_dim))),
+            requires_grad = True
         )
-        # actor
-        self.actions_out = [nn.Sequential(nn.Linear(hidden_size, shape).to(self.device), nn.Softmax(dim=-1)) for shape in
-                           action_dim]
-        # critic
-        self.value_out = nn.Linear(hidden_size, 1)
+        self.target_entropy = [self.discrete_target_entropy_scale * np.log(i).astype(np.float32) for i in act_dim]
 
-    def torch_from_np(self, array: np.ndarray) -> torch.Tensor:
-        return torch.as_tensor(np.asanyarray(array)).to(self.device)
+        self.policy_params = list(self.policy_network.parameters())
+        self.value_params = list(self.value_network.parameters())
 
-    def get_dist_and_value(self, obs: torch.FloatTensor):
-        """
-        """
-        hidden_state = self.hidden_state(obs)
-        action_prob = []
-        dists = []
-        for layer in self.actions_out:
-            action_out = layer(hidden_state)
-            action_prob.append(action_out)
-            dist = Categorical(action_out)
-            dists.append(dist)
+        learning_rate = 0.002
 
-        value = self.value_out(hidden_state)
+#       self.policy_optimizer = torch.optim.Adam(self.policy_params, lr=learning_rate)
+#       self.value_optimizer = torch.optim.Adam(self.value_params, lr=learning_rate)
+#       self.entropy_optimizer = torch.optim.Adam(self.log_entropy_coeff, lr=learning_rate)
 
-        return dists, value
-
-    def get_probs_and_entropies(self, acts: torch.FloatTensor, dists: torch.distributions.Categorical):
-        log_probs = torch.zeros([acts.shape[0]]).to(self.device)
-        entropies = torch.zeros([acts.shape[0]]).to(self.device)
-        for i, dist in enumerate(dists):
-            log_probs = torch.add(log_probs, dist.log_prob(acts[:, i]))
-            entropies = torch.add(entropies, dist.entropy())
-        return log_probs, entropies
-
-class Q_first(nn.Module):
-    def __init__(self, device):
-        super(Q_first, self).__init__()
-        self.device = device
-
-class Q_second(nn.Module):
-    def __init__(self, device):
-        super(Q_second, self).__init__()
-        self.device = device
-
+    def soft_update(self, source: nn.Module, target: nn.Module, tau: float):
+        for source_param, target_param in zip(source.parameters(), target.parameters()):
+            target_param.data.copy_(target_param.data * (1.0 - tau) + source_param.data * tau)
 
 class SAC_Meta_Learner:
-    """DQN Agent interacting with environment.
-
-    Attribute:
-        env (UnityEnvironment.env): UnityEnvironment
-        memory (PrioritizedReplayBuffer): replay memory to store transitions
-        batch_size (int): batch size for sampling
-        target_update (int): period for target model's hard update
-        gamma (float): discount factor
-        dqn (Network): model to train and select actions
-        dqn_target (Network): target model to update
-        transition (list): transition information including
-                           state, action, reward, next_state, done
-        v_min (float): min value of support
-        v_max (float): max value of support
-        atom_size (int): the unit number of support
-        support (torch.Tensor): support for categorical dqn
-        use_n_step (bool): whether to use n_step memory
-        n_step (int): step number to calculate n-step td error
-        memory_n (ReplayBuffer): n-step replay buffer
+    """
     """
 
     def __init__(
             self,
             device: torch.device,
-            gamma: float = 0.99,
-            update_period: int = 5000,
             writer: SummaryWriter = None,
-            decision_requester: int = 5,
     ):
         self.device = device
         print("Using: " + str(self.device))
         self.writer = writer
         self.meta_step = 0
-        self.actor_critic: ActorCritic
+        self.policy: ActorCriticPolicy
 
 
     def init_network_and_optim(self, hidden_size: int = 256, learning_rate: float = 0.0003):
@@ -113,14 +73,10 @@ class SAC_Meta_Learner:
         action_dim = self.action_space
         print("Obs space detected as: " + str(self.obs_space))
         print("Action space detected as: " + str(self.action_space))
-        self.actor_critic = ActorCritic(self.device,
-                                        obs_dim, action_dim, hidden_size
-                                        ).to(self.device)
+        self.networks = Optimizer(obs_dim, action_dim, 256, 2)
+        self.policy = self.networks.policy_network
 
-        self.q1 = Q_first()
-        self.q2 = Q_second()
-
-        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
+        self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
         lambda2 = lambda epoch: 0.95**epoch
         self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda2)
 
@@ -154,25 +110,6 @@ class SAC_Meta_Learner:
             discounted_r[t] = running_add
         return discounted_r
 
-    def get_gae(self, rewards, value_estimates, value_next=0.0, gamma=0.99, lambd=0.95):
-        """
-        Computes generalized advantage estimate for use in updating policy.
-        :param rewards: list of rewards for time-steps t to T.
-        :param value_next: Value estimate for time-step T+1.
-        :param value_estimates: list of value estimates for time-steps t to T.
-        :param gamma: Discount factor.
-        :param lambd: GAE weighing factor.
-        :return: list of advantage estimates for time-steps t to T.
-        """
-        value_estimates = np.append(value_estimates, value_next)
-        delta_t = rewards + gamma * value_estimates[1:] - value_estimates[:-1]
-        advantage = self.discount_rewards(r=delta_t, gamma=gamma * lambd)
-        return advantage
-
-    def torch_from_np(self, array: np.ndarray) -> torch.Tensor:
-        return torch.as_tensor(np.asanyarray(array)).to(self.device)
-
-
     def step_env(self, env: UnityEnvironment, actions: np.array):
         agents_transitions = {}
         for brain in env.behavior_specs:
@@ -192,30 +129,94 @@ class SAC_Meta_Learner:
 
         return agents_transitions
 
-    def split_buffer_into_batches(self, buffer, batch_size: int = 512):
-        batches = []
-        buffer_length = len(buffer['rews'])
-        indx = np.arange(buffer_length)
-        np.random.shuffle(indx)
-        for key in buffer:
-            buffer[key] = buffer[key][indx]
+    def calc_q_loss(self, q1_out, q2_out, target_values, done, rewards):
+        return -1, -1
+        for rew in enumerate(rewards):
+            q_backup.apppend()
+        q_1_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q1_out))
+        q_2_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q2_out))
 
-        for size in range(0, buffer_length, batch_size):
-            batch = {}
-            if size+batch_size <= buffer_length:
-                for key in buffer:
-                    batch[key] = buffer[key][size:size+batch_size]
-            else:
-                for key in buffer:
-                    batch[key] = buffer[key][size:]
+        return q_1_loss, q_2_loss
 
-            batches.append(batch)
-        return batches
+    def calc_value_loss(self, log_probs, values, q1p_out, q2p_out, ):
+        with torch.no_grad():
+            _ent_coeff = torch.exp(self.networks.log_entropy_coeff)
 
-    def generate_and_fill_buffer(self, buffer_size, time_horizon=256) -> {}:
-        start_time = time.time()
+    def calc_policy_loss(self, log_probs, q1p_out, action_space):
+        return -1
+        _ent_coeff = torch.exp(self.networks.log_entropy_coeff)
+        mean_q1 = torch.mean(torch.stack(list(q1p_out)))
+
+        action_probs = torch.exp(log_probs)
+        branched_per_act_entropy = break_into_branches(log_probs * action_probs, action_space)
+        branched_q = break_into_branches(mean_q1 * action_probs)
+
+    def calc_entropy_loss(self, log_probs, action_space):
+        with torch.no_grad():
+            branched_per_act_entropy = break_into_branches(log_probs * log_probs.exp(), action_space)
+
+            target_current_diff_branched = torch.stack([
+                torch.sum(_lp, axis=1, keepdim=True) + _te
+                for _lp, _te in zip(branched_per_act_entropy, self.networks.target_entropy)
+            ], axis=1)
+
+            target_current_diff = torch.squeeze(target_current_diff_branched, axis=2)
+            print(target_current_diff)
+            print(self.networks.log_entropy_coeff)
+            entropy_loss = -1 * torch.mean(self.networks.log_entropy_coeff * target_current_diff, axis=1)
+        print("Entropy Loss: ")
+        print(entropy_loss)
+        entropy_loss.backward()
+        return entropy_loss
+
+
+    def update(self, batch: Buffer):
+        observations = torch_from_np(batch.observations, self.device)
+        next_observations = torch_from_np(batch.next_observations, self.device)
+        rewards = torch_from_np(batch.rewards, self.device)
+        dones = torch_from_np(batch.done, self.device)
+
+        dists = self.policy.actor.forward(observations)
+        sampled_values = self.policy.critic.forward(observations)
+        actions = []
+        for dist in dists:
+            action = dist.sample()
+            actions.append(action)
+        actions = torch.stack(actions).transpose(0, 1) # From 3x batch_size to batch_size x 3 (2,2,0),(1,2,0),....
+        one_hot_actions = actions_to_onehot(actions, batch.action_space) # List with every element referring to a branch
+        # For every branch-> action gets one hot encoded
+        # Example -> (2,1,2) gets [tensor(0,0,1),tensor(0,1,0),tensor(0,0,1)]
+
+        _, entropies, all_log_probs = self.policy.get_probs_and_entropies(actions, dists)
+        with torch.no_grad():
+            q1_policy_out, q2_policy_out = self.networks.value_network.forward(observations)
+
+        q1_out, q2_out = self.networks.value_network.forward(observations)
+
+        with torch.no_grad():
+            target_values = self.networks.target_network.forward(next_observations)
+
+        branched_q1 = break_into_branches(q1_out, batch.action_space)
+        branched_q2 = break_into_branches(q2_out, batch.action_space)
+
+        condensed_q1 = torch.stack([torch.sum(act_branch*q_branch, dim=1, keepdim=True) for act_branch, q_branch in zip(one_hot_actions, branched_q1)])
+        condensed_q2 = torch.stack([torch.sum(act_branch*q_branch, dim=1, keepdim=True) for act_branch, q_branch in zip(one_hot_actions, branched_q2)])
+
+        q1_loss, q2_loss = self.calc_q_loss(condensed_q1, condensed_q2, target_values, dones, rewards)
+        value_loss = self.calc_value_loss(all_log_probs, sampled_values, q1_policy_out, q2_policy_out)
+
+        policy_loss = self.calc_policy_loss(all_log_probs, q1_policy_out, batch.action_space)
+
+        entropy_loss = self.calc_entropy_loss(all_log_probs, batch.action_space)
+        # total_value_loss = q1_loss + q2_loss + value_loss
+
+        # Update the target network
+
+        tau = 0.3
+        self.networks.soft_update(self.policy.critic, self.networks.target_network, tau)
+
+    def generate_trajectories(self, buffer, max_buffer_size, time_horizon=256) -> {}:
         env = self.env
-        env.reset()
 
         # Create transition dict
         transitions = {}
@@ -223,7 +224,8 @@ class SAC_Meta_Learner:
         trajectory_lengths = [] # length of agent trajectories, maxlen = timehorizon/done
         episode_lengths = []
 
-        buffer_length = 0
+        appended_steps = 0
+
         first_iteration = True
         buffer_finished = False
 
@@ -233,7 +235,11 @@ class SAC_Meta_Learner:
                 for brain in env.behavior_specs:
                     decision_steps, terminal_steps = env.get_steps(brain)
                     num_agents = len(decision_steps)
-                    episode_step = [0 for _ in range(num_agents)]
+                    if(num_agents == 0):
+                        env.reset()
+                        decision_steps, terminal_steps = env.get_steps(brain)
+                        num_agents = len(decision_steps)
+                    agent_current_step = [0 for _ in range(num_agents)]
                     current_added_reward = [0 for _ in range(num_agents)]
 
                     actions = np.zeros((num_agents, len(self.action_space)))
@@ -257,7 +263,9 @@ class SAC_Meta_Learner:
                         init_state = decision_steps[agent_id_decisions].obs
                         init_state = flatten(init_state)
                         with torch.no_grad():
-                            dists, value = self.actor_critic.forward(np.array(init_state))
+                            init_state = np.array(init_state)
+                            dists = self.policy.actor.forward(init_state)
+                            value = self.policy.critic.forward(init_state)
                             action = [dist.sample() for dist in dists]
                             entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                             action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in zip(dists, action)]
@@ -275,13 +283,14 @@ class SAC_Meta_Learner:
                         init_state = terminal_steps[agent_id_terminated].obs
                         init_state = flatten(init_state)
                         with torch.no_grad():
-                            dists, value = self.actor_critic.forward(np.array(init_state))
+                            init_state = np.array(init_state)
+                            dists = self.policy.actor.forward(init_state)
+                            value = self.policy.critic.forward(init_state)
                             entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                             action = [dist.sample() for dist in dists]
                             action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
                                                 zip(dists, action)]
                             action = [action_branch.detach().cpu().numpy() for action_branch in action]
-                            actions[agent_id_decisions] = action
                             value = value.detach().cpu().numpy()
 
                         actions[agent_id_terminated] = action
@@ -290,18 +299,6 @@ class SAC_Meta_Learner:
                         transitions[agent_id_terminated]['values_buf'][agent_ptr[agent_id_terminated]] = value
                         transitions[agent_id_terminated]['act_log_prob_buf'][agent_ptr[agent_id_terminated]] = action_log_probs
                         transitions[agent_id_terminated]['entropies_buf'][agent_ptr[agent_id_terminated]] = entropies
-
-                # Create the buffers
-                finished_obs_buf = np.zeros([buffer_size, self.obs_space], dtype=np.float32)
-                finished_next_obs_buf = np.zeros([buffer_size, self.obs_space], dtype=np.float32)
-                finished_acts_buf = np.zeros([buffer_size, len(self.action_space)], dtype=np.float32)
-                finished_log_probs_buf = np.zeros([buffer_size, len(self.action_space)], dtype=np.float32)
-                finished_rews_buf = np.zeros([buffer_size], dtype=np.float32)
-                finished_values_buf = np.zeros([buffer_size], dtype=np.float32)
-                finished_done_buf = np.zeros([buffer_size], dtype=np.float32)
-                finished_adv_buf = np.zeros([buffer_size], dtype=np.float32)
-                finished_entropies_buf = np.zeros([buffer_size, len(self.action_space)], dtype=np.float32)
-
 
             # Step environment
             next_experiences = self.step_env(self.env, np.array(actions))
@@ -321,11 +318,14 @@ class SAC_Meta_Learner:
                 transitions[agent_id]['n_obs_buf'][agent_ptr[agent_id]] = next_obs
                 transitions[agent_id]['done_buf'][agent_ptr[agent_id]] = done
 
-                episode_step[agent_id] += 1
+                agent_current_step[agent_id] += 1
                 if done or agent_ptr[agent_id] == time_horizon - 1:
                     # If the corresponding agent is done or trajectory is max length
                     with torch.no_grad():
-                        dists, value = self.actor_critic.forward(np.array(next_obs))
+                        next_obs_tmp = np.array(next_obs)
+                        dists = self.policy.actor.forward(next_obs_tmp)
+                        value = self.policy.critic.forward(next_obs_tmp)
+
                         action = [dist.sample() for dist in dists]
                         entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                         action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -340,31 +340,40 @@ class SAC_Meta_Learner:
 
                     actions[agent_id] = next_action
 
-                    if agent_ptr[agent_id] + buffer_length >= buffer_size:
-                        buffer_finished = True
-                        break
                     if done:
-                        episode_lengths.append(episode_step[agent_id])
-                        episode_step[agent_id] = 0
+                        episode_lengths.append(agent_current_step[agent_id])
+                        agent_current_step[agent_id] = 0
                         rewards.append(current_added_reward[agent_id])
                         current_added_reward[agent_id] = 0
 
                     trajectory_lengths.append(agent_ptr[agent_id] + 1)
-                    advantages = self.get_gae(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1],
-                                              transitions[agent_id]['values_buf'][:agent_ptr[agent_id] + 1])
 
-                    for i in range(agent_ptr[agent_id] + 1):  # For every experiences store it in buffer
-                        finished_obs_buf[i + buffer_length] = transitions[agent_id]['obs_buf'][i]
-                        finished_acts_buf[i + buffer_length] = transitions[agent_id]['acts_buf'][i]
-                        finished_rews_buf[i + buffer_length] = transitions[agent_id]['rews_buf'][i]
-                        finished_values_buf[i + buffer_length] = transitions[agent_id]['values_buf'][i]
-                        finished_next_obs_buf[i + buffer_length] = transitions[agent_id]['n_obs_buf'][i]
-                        finished_done_buf[i + buffer_length] = transitions[agent_id]['done_buf'][i]
-                        finished_log_probs_buf[i + buffer_length] = transitions[agent_id]['act_log_prob_buf'][i]
-                        finished_adv_buf[i + buffer_length] = advantages[i]
-                        finished_entropies_buf[i + buffer_length] = transitions[agent_id]['entropies_buf'][i]
+                    for i in range(agent_ptr[agent_id] + 1):
+                        # Store all experiences of the agent in the buffer
+                        appended_steps += 1
+                        if buffer.observations is None:
+                            buffer.observations = transitions[agent_id]['obs_buf'][i]
+                            buffer.actions = transitions[agent_id]['acts_buf'][i]
+                            buffer.rewards = transitions[agent_id]['rews_buf'][i]
+                            buffer.next_observations = transitions[agent_id]['n_obs_buf'][i]
+                            buffer.done = transitions[agent_id]['done_buf'][i]
+                        else:
+                            buffer.observations = np.vstack((buffer.observations, transitions[agent_id]['obs_buf'][i]))
+                            buffer.actions = np.vstack((buffer.actions, transitions[agent_id]['acts_buf'][i]))
+                            buffer.rewards = np.append(buffer.rewards, transitions[agent_id]['rews_buf'][i])
+                            buffer.next_observations = np.vstack((buffer.next_observations, transitions[agent_id]['n_obs_buf'][i]))
+                            buffer.done = np.append(buffer.done, transitions[agent_id]['done_buf'][i])
 
-                    buffer_length += agent_ptr[agent_id] + 1
+
+                    if(len(buffer) >= max_buffer_size):
+                        length_counter = len(buffer) - max_buffer_size
+                        buffer.observations = buffer.observations[length_counter:]
+                        buffer.rewards = buffer.rewards[length_counter:]
+                        buffer.actions = buffer.actions[length_counter:]
+                        buffer.next_observations = buffer.next_observations[length_counter:]
+                        buffer.done = buffer.done[length_counter:]
+                        buffer_finished = True
+                        break
 
                     transitions[agent_id]['obs_buf'] = np.zeros(
                         [time_horizon, self.obs_space], dtype=np.float32)
@@ -382,6 +391,8 @@ class SAC_Meta_Learner:
                     transitions[agent_id]['entropies_buf'] = np.zeros(
                         [time_horizon, len(self.action_space)],
                         dtype=np.float32)
+
+
                     agent_ptr[agent_id] = 0
 
                 else:  # If the corresponding agent is not done, continue
@@ -389,7 +400,9 @@ class SAC_Meta_Learner:
                     transitions[agent_id]['obs_buf'][agent_ptr[agent_id]] = next_obs
 
                     with torch.no_grad():
-                        dists, value = self.actor_critic.forward(np.array(next_obs))
+                        obs = np.array(next_obs)
+                        dists = self.policy.actor.forward(obs)
+                        value = self.policy.critic.forward(obs)
                         action = [dist.sample() for dist in dists]
                         entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                         action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -413,45 +426,36 @@ class SAC_Meta_Learner:
         self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(episode_lengths),
                                self.meta_step)
 
-        print("Generated buffer of lenth: {} in {:.3f} secs.".format(buffer_length, time.time()-start_time))
-
-        return {'obs': finished_obs_buf[:buffer_length], 'acts': finished_acts_buf[:buffer_length],
-                'rews': finished_rews_buf[:buffer_length], 'advs': finished_adv_buf[:buffer_length],
-                'n_obs': finished_next_obs_buf[:buffer_length], 'dones': finished_done_buf[:buffer_length],
-                'log_probs': finished_log_probs_buf[:buffer_length], 'entropies': finished_entropies_buf[:buffer_length],
-                'values': finished_values_buf[:buffer_length]}, buffer_length
+        return buffer, appended_steps
 
 
 writer = SummaryWriter("C:/Users/Sebastian/Desktop/RLUnity/Training/results" + r"/sac_test_2")
 
-sac_module = SAC_Meta_Learner('cuda', writer=writer)
+sac_module = SAC_Meta_Learner('cpu', writer=writer)
 
 engine_configuration_channel = EngineConfigurationChannel()
 engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
 
 env_parameters_channel = EnvironmentParametersChannel()
 env_parameters_channel.set_float_parameter("seed", 5.0)
-env = UnityEnvironment(file_name="C:/Users/Sebastian/Desktop/RLUnity/Training/mFindTarget_new/RLProject",
+env = UnityEnvironment(file_name="Training/Maze",
                        base_port=5000, timeout_wait=120,
                        no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
 
 sac_module.set_environment(env)
 sac_module.init_network_and_optim()
 steps = 0
+replay_buffer = Buffer(action_space=sac_module.action_space)
+
 while steps < 1000000:
-    print("Current step: " + str(steps))
-    buffer, buffer_length = sac_module.generate_and_fill_buffer(buffer_size=20000, time_horizon=512)
-    steps += buffer_length
-    epochs = 3
-    for i in range(epochs):
-        batches = sac_module.split_buffer_into_batches(buffer, batch_size=512)
-        for batch in batches:
-            loss = sac_module.calc_loss(batch, epsilon=0.2, beta=0.001, lambd=0.99)
-            sac_module.optimizer.zero_grad()
-            loss.backward()
-            sac_module.optimizer.step()
-        for parameter_group in sac_module.optimizer.param_groups:
-            print("Current learning rate: {}".format(parameter_group['lr']))
+    buffer, steps_taken = sac_module.generate_trajectories(replay_buffer, 2000)
+    print("Steps taken since last update: {}".format(steps_taken))
+    update_steps = 0
+    while update_steps < steps_taken:
+        batch = buffer.sample_batch(batch_size=128)
+        sac_module.update(batch)
+        update_steps += 1
+
     sac_module.meta_step += 1
     sac_module.learning_rate_scheduler.step()
 

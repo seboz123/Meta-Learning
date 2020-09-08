@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 # simply define a silu function
-def swish(input, beta):
+def swish(input, beta: float = 1):
     '''
     Applies the Sigmoid Linear Unit (SiLU) function element-wise:
         SiLU(x) = x * sigmoid(x)
@@ -29,7 +29,7 @@ class Swish(nn.Module):
         '''
         super().__init__() # init the base class
 
-    def forward(self, input, beta):
+    def forward(self, input, beta: float = 1):
         '''
         Forward pass of the function.
         '''
