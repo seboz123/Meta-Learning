@@ -5,6 +5,16 @@ from typing import List
 def torch_from_np(array: np.ndarray, device: str = 'cpu') -> torch.Tensor:
     return torch.as_tensor(np.asanyarray(array)).to(device)
 
+def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space) -> torch.Tensor:
+    one_hot_actions = actions_to_onehot(actions, action_space)
+    branched_q1 = break_into_branches(q_out, action_space)
+    only_qs = torch.stack([torch.sum(act_branch * q_branch, dim=1, keepdim=True) for act_branch, q_branch in
+                 zip(one_hot_actions, branched_q1)])
+    condensed_q = torch.mean(only_qs, dim=0)
+
+    return condensed_q
+
+
 
 def actions_to_onehot(
         discrete_actions: torch.Tensor, action_size: List[int]

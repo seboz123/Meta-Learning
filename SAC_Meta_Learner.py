@@ -13,44 +13,39 @@ from mlagents_envs.side_channel.engine_configuration_channel import EngineConfig
 from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
 from Buffer import Buffer
-from networks import ActorCriticPolicy, PolicyValueNetwork, ValueNetwork
-from utils import torch_from_np, actions_to_onehot, break_into_branches
+from models import ActorCriticPolicy, PolicyValueNetwork, ValueNetwork
+from utils import torch_from_np, break_into_branches, condense_q_stream
 
 flatten = lambda l: [item for sublist in l for item in sublist]
 
 
-class Optimizer:
-    def __init__(self, obs_dim, act_dim, hidden_size, num_hidden_layers):
-        act_len = sum(act_dim)
+class TorchNetworks:
+    def __init__(self, obs_dim, act_dim, hidden_size, num_hidden_layers, device: str = 'cpu'):
+        self.device = device
         self.discrete_target_entropy_scale = 0.2
-        self.init_entropy_coeff = 0.2 # Typical range: 0.05 - 0.5
+        self.init_entropy_coeff = 0.2  # Typical range: 0.05 - 0.5
+        self.policy_network = ActorCriticPolicy(obs_dim, act_dim, 256, device=device).to(device)  # Pi
 
-        self.policy_network = ActorCriticPolicy(obs_dim, act_dim, 256) # Pi
+        self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers, device=device).to(
+            device)  # Q
 
-        self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers) # Q
-
-        self.target_network = ValueNetwork(obs_dim, act_len, hidden_size, num_hidden_layers) # V
+        self.target_network = ValueNetwork(obs_dim, 1, hidden_size, num_hidden_layers, device=device).to(device)  # V
 
         self.soft_update(self.policy_network, self.target_network, 1.0)
 
         self.log_entropy_coeff = torch.nn.Parameter(
-            torch.log(torch.as_tensor([self.init_entropy_coeff] * len(act_dim))),
-            requires_grad = True
-        )
+            torch.log(torch.as_tensor([self.init_entropy_coeff] * len(act_dim))).to(device),
+            requires_grad=True
+        ).to(device)
         self.target_entropy = [self.discrete_target_entropy_scale * np.log(i).astype(np.float32) for i in act_dim]
 
         self.policy_params = list(self.policy_network.parameters())
         self.value_params = list(self.value_network.parameters())
 
-        learning_rate = 0.002
-
-#       self.policy_optimizer = torch.optim.Adam(self.policy_params, lr=learning_rate)
-#       self.value_optimizer = torch.optim.Adam(self.value_params, lr=learning_rate)
-#       self.entropy_optimizer = torch.optim.Adam(self.log_entropy_coeff, lr=learning_rate)
-
     def soft_update(self, source: nn.Module, target: nn.Module, tau: float):
         for source_param, target_param in zip(source.parameters(), target.parameters()):
             target_param.data.copy_(target_param.data * (1.0 - tau) + source_param.data * tau)
+
 
 class SAC_Meta_Learner:
     """
@@ -67,18 +62,24 @@ class SAC_Meta_Learner:
         self.meta_step = 0
         self.policy: ActorCriticPolicy
 
-
-    def init_network_and_optim(self, hidden_size: int = 256, learning_rate: float = 0.0003):
+    def init_networks_and_optimizers(self, hidden_size: int = 256, hidden_layers: int = 2, total_steps: int = 100000,
+                                     learning_rate: float = 0.0003, device: str = 'cpu'):
         obs_dim = self.obs_space
         action_dim = self.action_space
-        print("Obs space detected as: " + str(self.obs_space))
-        print("Action space detected as: " + str(self.action_space))
-        self.networks = Optimizer(obs_dim, action_dim, 256, 2)
+        self.networks = TorchNetworks(obs_dim, action_dim, hidden_size, hidden_layers, device)
         self.policy = self.networks.policy_network
 
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
-        lambda2 = lambda epoch: 0.95**epoch
-        self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda2)
+        value_parameters = list(self.networks.value_network.parameters()) + list(self.policy.critic.parameters())
+        policy_parameters = list(self.policy.actor.parameters())
+
+        self.policy_optimizer = optim.Adam(policy_parameters, lr=learning_rate)
+        self.value_optimizer = optim.Adam(value_parameters, lr=learning_rate)
+        self.entropy_optimizer = optim.Adam([self.networks.log_entropy_coeff], lr=learning_rate)
+
+        lambda2 = lambda epoch: -learning_rate * epoch / total_steps + learning_rate
+        self.learning_rate_scheduler_p = optim.lr_scheduler.LambdaLR(self.policy_optimizer, lr_lambda=lambda2)
+        self.learning_rate_scheduler_v = optim.lr_scheduler.LambdaLR(self.value_optimizer, lr_lambda=lambda2)
+        self.learning_rate_scheduler_e = optim.lr_scheduler.LambdaLR(self.entropy_optimizer, lr_lambda=lambda2)
 
     def set_environment(self, env):
         env.reset()
@@ -93,6 +94,9 @@ class SAC_Meta_Learner:
                     result += shape[0]
         self.obs_space = result
         self.action_space = branches
+        print("New environment set. Space detection was successful.")
+        print("Obs space detected as: " + str(self.obs_space))
+        print("Action space detected as: " + str(self.action_space))
         self.env.reset()
 
     def discount_rewards(self, r, gamma=0.99, value_next=0.0):
@@ -129,91 +133,121 @@ class SAC_Meta_Learner:
 
         return agents_transitions
 
-    def calc_q_loss(self, q1_out, q2_out, target_values, done, rewards):
-        return -1, -1
-        for rew in enumerate(rewards):
-            q_backup.apppend()
-        q_1_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q1_out))
-        q_2_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q2_out))
+    def calc_q_loss(self, q1_out, q2_out, target_values, dones, rewards):
+        gamma = 0.99
+        q1_out = q1_out.squeeze()
+        q2_out = q2_out.squeeze()
+        target_values = target_values.squeeze()
+        with torch.no_grad():
+            q_backup = rewards + (1 - dones) * gamma * target_values
+        q1_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q1_out))
+        q2_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q2_out))
 
-        return q_1_loss, q_2_loss
+        return q1_loss, q2_loss
 
-    def calc_value_loss(self, log_probs, values, q1p_out, q2p_out, ):
+    def calc_value_loss(self, log_probs, values, q1p_out, q2p_out, action_space):
         with torch.no_grad():
             _ent_coeff = torch.exp(self.networks.log_entropy_coeff)
 
+        action_probs = log_probs.exp()
+        _branched_q1_policy_out = break_into_branches(q1p_out * action_probs, action_space)
+        _branched_q2_policy_out = break_into_branches(q2p_out * action_probs, action_space)
+
+        _q1_policy_mean = torch.mean(
+            torch.stack(
+                [torch.sum(_br, dim=1, keepdim=True) for _br in _branched_q1_policy_out]
+            )
+        )
+        _q2_policy_mean = torch.mean(
+            torch.stack(
+                [torch.sum(_br, dim=1, keepdim=True) for _br in _branched_q2_policy_out]
+            )
+        )
+        minimal_policy_qs = torch.min(_q1_policy_mean, _q2_policy_mean)
+        branched_per_action_ent = break_into_branches(log_probs * log_probs.exp(), action_space)
+        branched_ent_bonus = torch.stack(
+            [
+                torch.sum(_ent_coeff[i] * _lp, dim=1, keepdim=True)
+                for i, _lp in enumerate(branched_per_action_ent)
+            ]
+        )
+        with torch.no_grad():
+            v_backup = minimal_policy_qs - torch.mean(branched_ent_bonus, axis=0)
+
+        value_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(values.squeeze(), v_backup.squeeze()))
+
+        return value_loss
+
     def calc_policy_loss(self, log_probs, q1p_out, action_space):
-        return -1
         _ent_coeff = torch.exp(self.networks.log_entropy_coeff)
+
         mean_q1 = torch.mean(torch.stack(list(q1p_out)))
 
         action_probs = torch.exp(log_probs)
+
         branched_per_act_entropy = break_into_branches(log_probs * action_probs, action_space)
-        branched_q = break_into_branches(mean_q1 * action_probs)
+        branched_q = break_into_branches(mean_q1 * action_probs, action_space)
+
+        branched_policy_loss = torch.stack(
+            [
+                torch.sum(_ent_coeff[i] * _lp - _qt, dim=1, keepdim=True)
+                for i, (_lp, _qt) in enumerate(zip(branched_per_act_entropy, branched_q))
+            ]
+        )
+        batch_policy_loss = branched_policy_loss.squeeze()
+        policy_loss = torch.mean(batch_policy_loss)
+
+        return policy_loss
 
     def calc_entropy_loss(self, log_probs, action_space):
         with torch.no_grad():
             branched_per_act_entropy = break_into_branches(log_probs * log_probs.exp(), action_space)
 
-            target_current_diff_branched = torch.stack([
+            branched_ent_sums = torch.stack([
                 torch.sum(_lp, axis=1, keepdim=True) + _te
                 for _lp, _te in zip(branched_per_act_entropy, self.networks.target_entropy)
             ], axis=1)
-
-            target_current_diff = torch.squeeze(target_current_diff_branched, axis=2)
-            print(target_current_diff)
-            print(self.networks.log_entropy_coeff)
-            entropy_loss = -1 * torch.mean(self.networks.log_entropy_coeff * target_current_diff, axis=1)
-        print("Entropy Loss: ")
-        print(entropy_loss)
-        entropy_loss.backward()
+            branched_ent_sums = torch.squeeze(branched_ent_sums)
+        entropy_loss = -1 * torch.mean(torch.mean(self.networks.log_entropy_coeff * branched_ent_sums, axis=1), axis=0)
         return entropy_loss
 
-
-    def update(self, batch: Buffer):
-        observations = torch_from_np(batch.observations, self.device)
-        next_observations = torch_from_np(batch.next_observations, self.device)
+    def calc_losses(self, batch: Buffer):
+        observations = batch.observations
+        next_observations = batch.next_observations
         rewards = torch_from_np(batch.rewards, self.device)
         dones = torch_from_np(batch.done, self.device)
 
-        dists = self.policy.actor.forward(observations)
-        sampled_values = self.policy.critic.forward(observations)
+        dists = self.policy.actor(observations)
+        sampled_values = self.policy.critic(observations)
         actions = []
         for dist in dists:
             action = dist.sample()
             actions.append(action)
-        actions = torch.stack(actions).transpose(0, 1) # From 3x batch_size to batch_size x 3 (2,2,0),(1,2,0),....
-        one_hot_actions = actions_to_onehot(actions, batch.action_space) # List with every element referring to a branch
-        # For every branch-> action gets one hot encoded
-        # Example -> (2,1,2) gets [tensor(0,0,1),tensor(0,1,0),tensor(0,0,1)]
+        actions = torch.stack(actions).transpose(0, 1)
 
         _, entropies, all_log_probs = self.policy.get_probs_and_entropies(actions, dists)
         with torch.no_grad():
-            q1_policy_out, q2_policy_out = self.networks.value_network.forward(observations)
-
-        q1_out, q2_out = self.networks.value_network.forward(observations)
+            q1_policy_out, q2_policy_out = self.networks.value_network(observations)
 
         with torch.no_grad():
-            target_values = self.networks.target_network.forward(next_observations)
+            target_values = self.networks.target_network(next_observations)
 
-        branched_q1 = break_into_branches(q1_out, batch.action_space)
-        branched_q2 = break_into_branches(q2_out, batch.action_space)
+        q1_out, q2_out = self.networks.value_network(observations)
 
-        condensed_q1 = torch.stack([torch.sum(act_branch*q_branch, dim=1, keepdim=True) for act_branch, q_branch in zip(one_hot_actions, branched_q1)])
-        condensed_q2 = torch.stack([torch.sum(act_branch*q_branch, dim=1, keepdim=True) for act_branch, q_branch in zip(one_hot_actions, branched_q2)])
+        condensed_q1 = condense_q_stream(q1_out, actions, batch.action_space)
+        condensed_q2 = condense_q_stream(q2_out, actions, batch.action_space)
 
-        q1_loss, q2_loss = self.calc_q_loss(condensed_q1, condensed_q2, target_values, dones, rewards)
-        value_loss = self.calc_value_loss(all_log_probs, sampled_values, q1_policy_out, q2_policy_out)
+        value_loss = self.calc_value_loss(all_log_probs, sampled_values, q1_policy_out, q2_policy_out,
+                                          batch.action_space)
 
         policy_loss = self.calc_policy_loss(all_log_probs, q1_policy_out, batch.action_space)
 
         entropy_loss = self.calc_entropy_loss(all_log_probs, batch.action_space)
-        # total_value_loss = q1_loss + q2_loss + value_loss
+        q1_loss, q2_loss = self.calc_q_loss(condensed_q1, condensed_q2, target_values, dones, rewards)
 
         # Update the target network
 
-        tau = 0.3
-        self.networks.soft_update(self.policy.critic, self.networks.target_network, tau)
+        return policy_loss, value_loss, entropy_loss, q1_loss, q2_loss
 
     def generate_trajectories(self, buffer, max_buffer_size, time_horizon=256) -> {}:
         env = self.env
@@ -221,7 +255,7 @@ class SAC_Meta_Learner:
         # Create transition dict
         transitions = {}
         rewards = []
-        trajectory_lengths = [] # length of agent trajectories, maxlen = timehorizon/done
+        trajectory_lengths = []  # length of agent trajectories, maxlen = timehorizon/done
         episode_lengths = []
 
         appended_steps = 0
@@ -235,7 +269,7 @@ class SAC_Meta_Learner:
                 for brain in env.behavior_specs:
                     decision_steps, terminal_steps = env.get_steps(brain)
                     num_agents = len(decision_steps)
-                    if(num_agents == 0):
+                    if (num_agents == 0):
                         env.reset()
                         decision_steps, terminal_steps = env.get_steps(brain)
                         num_agents = len(decision_steps)
@@ -254,7 +288,7 @@ class SAC_Meta_Learner:
                             'act_log_prob_buf': np.zeros([time_horizon, len(self.action_space)],
                                                          dtype=np.float32),
                             'entropies_buf': np.zeros([time_horizon, len(self.action_space)],
-                                                         dtype=np.float32),
+                                                      dtype=np.float32),
                             'values_buf': np.zeros([time_horizon], dtype=np.float32),
                             'rews_buf': np.zeros([time_horizon], dtype=np.float32),
                             'done_buf': np.zeros([time_horizon], dtype=np.float32)}
@@ -264,18 +298,20 @@ class SAC_Meta_Learner:
                         init_state = flatten(init_state)
                         with torch.no_grad():
                             init_state = np.array(init_state)
-                            dists = self.policy.actor.forward(init_state)
-                            value = self.policy.critic.forward(init_state)
+                            dists = self.policy.actor(init_state)
+                            value = self.policy.critic(init_state)
                             action = [dist.sample() for dist in dists]
                             entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
-                            action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in zip(dists, action)]
-                            action =[action_branch.detach().cpu().numpy() for action_branch in action]
+                            action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
+                                                zip(dists, action)]
+                            action = [action_branch.detach().cpu().numpy() for action_branch in action]
                             actions[agent_id_decisions] = action
                             value = value.detach().cpu().numpy()
 
                         transitions[agent_id_decisions]['obs_buf'][agent_ptr[agent_id_decisions]] = init_state
                         transitions[agent_id_decisions]['acts_buf'][agent_ptr[agent_id_decisions]] = action
-                        transitions[agent_id_decisions]['act_log_prob_buf'][agent_ptr[agent_id_decisions]] = action_log_probs
+                        transitions[agent_id_decisions]['act_log_prob_buf'][
+                            agent_ptr[agent_id_decisions]] = action_log_probs
                         transitions[agent_id_decisions]['values_buf'][agent_ptr[agent_id_decisions]] = value
                         transitions[agent_id_decisions]['entropies_buf'][agent_ptr[agent_id_decisions]] = entropies
 
@@ -284,8 +320,8 @@ class SAC_Meta_Learner:
                         init_state = flatten(init_state)
                         with torch.no_grad():
                             init_state = np.array(init_state)
-                            dists = self.policy.actor.forward(init_state)
-                            value = self.policy.critic.forward(init_state)
+                            dists = self.policy.actor(init_state)
+                            value = self.policy.critic(init_state)
                             entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                             action = [dist.sample() for dist in dists]
                             action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -297,7 +333,8 @@ class SAC_Meta_Learner:
                         transitions[agent_id_terminated]['obs_buf'][agent_ptr[agent_id_terminated]] = init_state
                         transitions[agent_id_terminated]['acts_buf'][agent_ptr[agent_id_terminated]] = action
                         transitions[agent_id_terminated]['values_buf'][agent_ptr[agent_id_terminated]] = value
-                        transitions[agent_id_terminated]['act_log_prob_buf'][agent_ptr[agent_id_terminated]] = action_log_probs
+                        transitions[agent_id_terminated]['act_log_prob_buf'][
+                            agent_ptr[agent_id_terminated]] = action_log_probs
                         transitions[agent_id_terminated]['entropies_buf'][agent_ptr[agent_id_terminated]] = entropies
 
             # Step environment
@@ -323,8 +360,8 @@ class SAC_Meta_Learner:
                     # If the corresponding agent is done or trajectory is max length
                     with torch.no_grad():
                         next_obs_tmp = np.array(next_obs)
-                        dists = self.policy.actor.forward(next_obs_tmp)
-                        value = self.policy.critic.forward(next_obs_tmp)
+                        dists = self.policy.actor(next_obs_tmp)
+                        value = self.policy.critic(next_obs_tmp)
 
                         action = [dist.sample() for dist in dists]
                         entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
@@ -361,11 +398,11 @@ class SAC_Meta_Learner:
                             buffer.observations = np.vstack((buffer.observations, transitions[agent_id]['obs_buf'][i]))
                             buffer.actions = np.vstack((buffer.actions, transitions[agent_id]['acts_buf'][i]))
                             buffer.rewards = np.append(buffer.rewards, transitions[agent_id]['rews_buf'][i])
-                            buffer.next_observations = np.vstack((buffer.next_observations, transitions[agent_id]['n_obs_buf'][i]))
+                            buffer.next_observations = np.vstack(
+                                (buffer.next_observations, transitions[agent_id]['n_obs_buf'][i]))
                             buffer.done = np.append(buffer.done, transitions[agent_id]['done_buf'][i])
 
-
-                    if(len(buffer) >= max_buffer_size):
+                    if (len(buffer) >= max_buffer_size):
                         length_counter = len(buffer) - max_buffer_size
                         buffer.observations = buffer.observations[length_counter:]
                         buffer.rewards = buffer.rewards[length_counter:]
@@ -392,7 +429,6 @@ class SAC_Meta_Learner:
                         [time_horizon, len(self.action_space)],
                         dtype=np.float32)
 
-
                     agent_ptr[agent_id] = 0
 
                 else:  # If the corresponding agent is not done, continue
@@ -401,8 +437,8 @@ class SAC_Meta_Learner:
 
                     with torch.no_grad():
                         obs = np.array(next_obs)
-                        dists = self.policy.actor.forward(obs)
-                        value = self.policy.critic.forward(obs)
+                        dists = self.policy.actor(obs)
+                        value = self.policy.critic(obs)
                         action = [dist.sample() for dist in dists]
                         entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                         action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -431,31 +467,49 @@ class SAC_Meta_Learner:
 
 writer = SummaryWriter("C:/Users/Sebastian/Desktop/RLUnity/Training/results" + r"/sac_test_2")
 
-sac_module = SAC_Meta_Learner('cpu', writer=writer)
+sac_module = SAC_Meta_Learner('cuda', writer=writer)
 
 engine_configuration_channel = EngineConfigurationChannel()
 engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
 
 env_parameters_channel = EnvironmentParametersChannel()
 env_parameters_channel.set_float_parameter("seed", 5.0)
-env = UnityEnvironment(file_name="Training/Maze",
+env = UnityEnvironment(file_name="mFindTarget_new/RLProject.exe",
                        base_port=5000, timeout_wait=120,
                        no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
 
 sac_module.set_environment(env)
-sac_module.init_network_and_optim()
+sac_module.init_networks_and_optimizers(device='cuda')
 steps = 0
+max_steps = 1000000
 replay_buffer = Buffer(action_space=sac_module.action_space)
 
-while steps < 1000000:
+while steps < max_steps:
     buffer, steps_taken = sac_module.generate_trajectories(replay_buffer, 2000)
     print("Steps taken since last update: {}".format(steps_taken))
     update_steps = 0
+    frame_start = time.time()
     while update_steps < steps_taken:
         batch = buffer.sample_batch(batch_size=128)
-        sac_module.update(batch)
+        p_loss, v_loss, e_loss, q1_loss, q2_loss = sac_module.calc_losses(batch)
+        total_value_loss = q1_loss + q2_loss + v_loss
+
+        sac_module.policy_optimizer.zero_grad()
+        sac_module.value_optimizer.zero_grad()
+        sac_module.entropy_optimizer.zero_grad()
+
+        p_loss.backward()
+        total_value_loss.backward()
+        e_loss.backward()
+
+        sac_module.policy_optimizer.step()
+        sac_module.value_optimizer.step()
+        sac_module.entropy_optimizer.step()
+
         update_steps += 1
-
+    frame_end = time.time()
+    print("Current Update rate = {} updates per second".format(steps_taken / (frame_end - frame_start)))
     sac_module.meta_step += 1
-    sac_module.learning_rate_scheduler.step()
-
+    sac_module.learning_rate_scheduler_e.step()
+    sac_module.learning_rate_scheduler_p.step()
+    sac_module.learning_rate_scheduler_v.step()
