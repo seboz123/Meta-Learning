@@ -12,69 +12,72 @@ from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
 from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
-from utils import torch_from_np
+from utils import torch_from_np, get_probs_and_entropies
+from buffers import PPOBuffer
+from models import ActorCriticPolicy
+
+torch.backends.cudnn.benchmark = True
 
 flatten = lambda l: [item for sublist in l for item in sublist]
 
-
-class ActorCritic(nn.Module):
-    def __init__(self, device, state_dim, action_dim, hidden_size: int = 256):
-        super(ActorCritic, self).__init__()
-
-        self.device = device
-        # actor
-        self.action_layer = nn.Sequential(
-            nn.Linear(state_dim, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-        )
-        self.out_layers = [nn.Sequential(nn.Linear(hidden_size, shape).to(self.device), nn.Softmax(dim=-1)) for shape in
-                           action_dim]
-
-        # critic
-        self.value_layer = nn.Sequential(
-            nn.Linear(state_dim, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, 1)
-        )
-
-    def get_dist_and_value(self, obs: torch.FloatTensor) -> (torch.distributions.Categorical, torch.FloatTensor):
-        """
-
-        Args:
-            obs: Observations
-        Returns: dists, values
-
-        """
-        action_hidden_state = self.action_layer(obs)
-        action_prob = []
-        dists = []
-        for layer in self.out_layers:
-            action_out = layer(action_hidden_state)
-            action_prob.append(action_out)
-            dist = Categorical(action_out)
-            dists.append(dist)
-
-        values = self.value_layer(obs)
-        values = values.squeeze()
-
-        return dists, values
-
-    def forward(self, obs: torch.FloatTensor) -> (torch.distributions.Categorical, torch.FloatTensor):
-        obs = torch_from_np(obs)
-        return self.get_dist_and_value(obs)
-
-
-    def get_probs_and_entropies(self, acts: torch.FloatTensor, dists: torch.distributions.Categorical):
-        log_probs = torch.zeros([acts.shape[0]]).to(self.device)
-        entropies = torch.zeros([acts.shape[0]]).to(self.device)
-        for i, dist in enumerate(dists):
-            log_probs = torch.add(log_probs, dist.log_prob(acts[:, i]))
-            entropies = torch.add(entropies, dist.entropy())
-        return log_probs, entropies
+#
+# class ActorCritic(nn.Module):
+#     def __init__(self, device, state_dim, action_dim, hidden_size: int = 256):
+#         super(ActorCritic, self).__init__()
+#
+#         self.device = device
+#         # actor
+#         self.action_layer = nn.Sequential(
+#             nn.Linear(state_dim, hidden_size),
+#             nn.Tanh(),
+#             nn.Linear(hidden_size, hidden_size),
+#             nn.Tanh(),
+#         )
+#         self.out_layers = [nn.Sequential(nn.Linear(hidden_size, shape).to(self.device), nn.Softmax(dim=-1)) for shape in
+#                            action_dim]
+#
+#         # critic
+#         self.value_layer = nn.Sequential(
+#             nn.Linear(state_dim, hidden_size),
+#             nn.Tanh(),
+#             nn.Linear(hidden_size, hidden_size),
+#             nn.Tanh(),
+#             nn.Linear(hidden_size, 1)
+#         )
+#
+#     def get_dist_and_value(self, obs: torch.FloatTensor) -> (torch.distributions.Categorical, torch.FloatTensor):
+#         """
+#
+#         Args:
+#             obs: Observations
+#         Returns: dists, values
+#
+#         """
+#         action_hidden_state = self.action_layer(obs)
+#         action_prob = []
+#         dists = []
+#         for layer in self.out_layers:
+#             action_out = layer(action_hidden_state)
+#             action_prob.append(action_out)
+#             dist = Categorical(action_out)
+#             dists.append(dist)
+#
+#         values = self.value_layer(obs)
+#         values = values.squeeze()
+#
+#         return dists, values
+#
+#     def forward(self, obs: torch.FloatTensor) -> (torch.distributions.Categorical, torch.FloatTensor):
+#         obs = torch_from_np(obs)
+#         return self.get_dist_and_value(obs)
+#
+#     def get_probs_and_entropies(self, acts: torch.FloatTensor, dists: torch.distributions.Categorical):
+#         log_probs = torch.zeros([acts.shape[0]]).to(self.device)
+#         entropies = torch.zeros([acts.shape[0]]).to(self.device)
+#         for i, dist in enumerate(dists):
+#             log_probs = torch.add(log_probs, dist.log_prob(acts[:, i]))
+#             entropies = torch.add(entropies, dist.entropy())
+#         return log_probs, entropies
 
 
 class PPO_Meta_Learner:
@@ -102,16 +105,13 @@ class PPO_Meta_Learner:
     def __init__(
             self,
             device: torch.device,
-            gamma: float = 0.99,
-            update_period: int = 5000,
             writer: SummaryWriter = None,
-            decision_requester: int = 5,
     ):
         self.device = device
         print("Using: " + str(self.device))
         self.writer = writer
         self.meta_step = 0
-        self.actor_critic: ActorCritic
+        self.actor_critic: ActorCriticPolicy
 
     def set_environment(self, env):
         env.reset()
@@ -158,21 +158,16 @@ class PPO_Meta_Learner:
         advantage = self.discount_rewards(r=delta_t, gamma=gamma * lambd)
         return advantage
 
-    def evaluate_actions(self, obs: np.ndarray, acts: np.ndarray) -> (torch.FloatTensor, torch.FloatTensor, torch.FloatTensor):
-        """
-        Args:
-            obs:
-            acts:
-
-        Returns:
-        """
+    def evaluate_actions(self, obs: np.ndarray, acts: np.ndarray) -> (
+            torch.FloatTensor, torch.FloatTensor, torch.FloatTensor):
         obs = torch_from_np(obs)
         acts = torch_from_np(acts)
-        dists, values = self.actor_critic.get_dist_and_value(obs)
-        log_probs, entropies = self.actor_critic.get_probs_and_entropies(acts, dists) # Error here
-        return log_probs, entropies, values
+        dists, values = self.actor_critic.policy(obs)
+        cumulated_log_probs, entropies, all_log_probs = get_probs_and_entropies(acts, dists, self.device)  # Error here
+        return cumulated_log_probs, entropies, values
 
-    def calc_value_loss(self, values: torch.FloatTensor, old_values: torch.FloatTensor, returns: torch.FloatTensor, eps) -> torch.FloatTensor:
+    def calc_value_loss(self, values: torch.FloatTensor, old_values: torch.FloatTensor, returns: torch.FloatTensor,
+                        eps) -> torch.FloatTensor:
         clipped_value_est = old_values + torch.clamp(values - old_values, -1 * eps, eps)
         tmp_loss_1 = torch.pow(returns - values, 2)
         tmp_loss_2 = torch.pow(returns - clipped_value_est, 2)
@@ -180,23 +175,23 @@ class PPO_Meta_Learner:
         value_loss = 0.5 * torch.mean(value_loss)
         return value_loss
 
-    def calc_policy_loss(self, advantages: torch.FloatTensor, log_probs: torch.FloatTensor, old_log_probs: torch.FloatTensor, eps: float = 0.2  ) -> torch.FloatTensor:
+    def calc_policy_loss(self, advantages: torch.FloatTensor, log_probs: torch.FloatTensor,
+                         old_log_probs: torch.FloatTensor, eps: float = 0.2) -> torch.FloatTensor:
         ratio = torch.exp(log_probs - old_log_probs)
         tmp_loss_1 = ratio * advantages
         tmp_loss_2 = torch.clamp(ratio, 1.0 - eps, 1.0 + eps) * advantages
         policy_loss = - (torch.min(tmp_loss_1, tmp_loss_2)).mean()
         return policy_loss
 
+    def calc_loss(self, buffer: {}, gamma: float = 0.99, epsilon: float = 0.2, beta: float = 0.001, lambd=0.99) -> torch.Tensor:
 
-    def calc_loss(self, buffer: {}, epsilon: float = 0.2, beta: float = 0.001, lambd = 0.99) -> torch.Tensor:
+        old_log_probs = np.sum(buffer.act_log_probs, axis=1)  # Multiply all probs is adding all log_probs
+        obs = buffer.observations
+        acts = buffer.actions
+        values = buffer.values
+        rews = buffer.rewards
 
-        old_log_probs = np.sum(buffer['log_probs'], axis=1) # Multiply all probs is adding all log_probs
-        obs = buffer['obs']
-        acts = buffer['acts']
-        values = buffer['values']
-        rews = buffer['rews']
-
-        advantages = self.get_gae(rews, values, lambd)
+        advantages = self.get_gae(rews, values, gamma, lambd)
         normalized_advantages = (advantages - advantages.mean()) / (advantages.std() + 0.000001)
 
         returns = np.add(normalized_advantages, values)
@@ -211,7 +206,7 @@ class PPO_Meta_Learner:
         policy_loss = self.calc_policy_loss(normalized_advantages, log_probs, old_log_probs, eps=epsilon)
         entropy = entropies.mean()
 
-        kullback_leibler = 0.5 * torch.mean(torch.pow(log_probs-old_log_probs, 2))
+        kullback_leibler = 0.5 * torch.mean(torch.pow(log_probs - old_log_probs, 2))
         policy_loss = policy_loss
         value_loss = 0.5 * value_loss
         entropy_loss = - beta * entropy
@@ -227,19 +222,15 @@ class PPO_Meta_Learner:
 
         return loss, policy_loss.item(), value_loss.item(), entropy.item(), kullback_leibler.item()
 
-    def init_network_and_optim(self, hidden_size: int = 256, learning_rate: float = 0.0003):
+    def init_network_and_optim(self, learning_rate_steps: int = 1000, hidden_size: int = 256, num_hidden_layers = 2, learning_rate: float = 0.0003):
         obs_dim = self.obs_space
         action_dim = self.action_space
         print("Obs space detected as: " + str(self.obs_space))
         print("Action space detected as: " + str(self.action_space))
-        self.actor_critic = ActorCritic(self.device,
-                                        obs_dim, action_dim, hidden_size
-                                        ).to(self.device)
-
+        self.actor_critic = ActorCriticPolicy(obs_dim, action_dim, hidden_size, num_hidden_layers, True).to(self.device)
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
-        lambda2 = lambda epoch: 0.95**epoch
-        self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda2)
-
+        linear_schedule = lambda epoch: (1 - epoch/max_steps)
+        self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
 
     def step_env(self, env: UnityEnvironment, actions: np.array):
         agents_transitions = {}
@@ -256,31 +247,12 @@ class PPO_Meta_Learner:
 
             for agent_id_terminated in terminal_steps:
                 agents_transitions[agent_id_terminated] = [terminal_steps[agent_id_terminated].obs,
-                                                           terminal_steps[agent_id_terminated].reward, True]
+                                                           terminal_steps[agent_id_terminated].reward,
+                                                           not terminal_steps[agent_id_terminated].interrupted]
 
         return agents_transitions
 
-    def split_buffer_into_batches(self, buffer, batch_size: int = 512):
-        batches = []
-        buffer_length = len(buffer['rews'])
-        indx = np.arange(buffer_length)
-        np.random.shuffle(indx)
-        for key in buffer:
-            buffer[key] = buffer[key][indx]
-
-        for size in range(0, buffer_length, batch_size):
-            batch = {}
-            if size+batch_size <= buffer_length:
-                for key in buffer:
-                    batch[key] = buffer[key][size:size+batch_size]
-            else:
-                for key in buffer:
-                    batch[key] = buffer[key][size:]
-
-            batches.append(batch)
-        return batches
-
-    def generate_and_fill_buffer(self, buffer_size, time_horizon=256) -> {}:
+    def generate_and_fill_buffer(self, buffer: PPOBuffer, time_horizon=256) -> {}:
         start_time = time.time()
         env = self.env
         env.reset()
@@ -288,7 +260,7 @@ class PPO_Meta_Learner:
         # Create transition dict
         transitions = {}
         rewards = []
-        trajectory_lengths = [] # length of agent trajectories, maxlen = timehorizon/done
+        trajectory_lengths = []  # length of agent trajectories, maxlen = timehorizon/done
         episode_lengths = []
 
         buffer_length = 0
@@ -316,7 +288,7 @@ class PPO_Meta_Learner:
                             'act_log_prob_buf': np.zeros([time_horizon, len(self.action_space)],
                                                          dtype=np.float32),
                             'entropies_buf': np.zeros([time_horizon, len(self.action_space)],
-                                                         dtype=np.float32),
+                                                      dtype=np.float32),
                             'values_buf': np.zeros([time_horizon], dtype=np.float32),
                             'rews_buf': np.zeros([time_horizon], dtype=np.float32),
                             'done_buf': np.zeros([time_horizon], dtype=np.float32)}
@@ -325,17 +297,20 @@ class PPO_Meta_Learner:
                         init_state = decision_steps[agent_id_decisions].obs
                         init_state = flatten(init_state)
                         with torch.no_grad():
-                            dists, value = self.actor_critic.forward(np.array(init_state))
+                            init_tensor = torch_from_np(np.array(init_state), self.device)
+                            dists, value = self.actor_critic.policy(init_tensor)
                             action = [dist.sample() for dist in dists]
                             entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
-                            action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in zip(dists, action)]
-                            action =[action_branch.detach().cpu().numpy() for action_branch in action]
+                            action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
+                                                zip(dists, action)]
+                            action = [action_branch.detach().cpu().numpy() for action_branch in action]
                             actions[agent_id_decisions] = action
                             value = value.detach().cpu().numpy()
 
                         transitions[agent_id_decisions]['obs_buf'][agent_ptr[agent_id_decisions]] = init_state
                         transitions[agent_id_decisions]['acts_buf'][agent_ptr[agent_id_decisions]] = action
-                        transitions[agent_id_decisions]['act_log_prob_buf'][agent_ptr[agent_id_decisions]] = action_log_probs
+                        transitions[agent_id_decisions]['act_log_prob_buf'][
+                            agent_ptr[agent_id_decisions]] = action_log_probs
                         transitions[agent_id_decisions]['values_buf'][agent_ptr[agent_id_decisions]] = value
                         transitions[agent_id_decisions]['entropies_buf'][agent_ptr[agent_id_decisions]] = entropies
 
@@ -343,7 +318,8 @@ class PPO_Meta_Learner:
                         init_state = terminal_steps[agent_id_terminated].obs
                         init_state = flatten(init_state)
                         with torch.no_grad():
-                            dists, value = self.actor_critic.forward(np.array(init_state))
+                            init_tensor = torch_from_np(np.array(init_state), self.device)
+                            dists, value = self.actor_critic.policy(init_tensor)
                             entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                             action = [dist.sample() for dist in dists]
                             action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -355,20 +331,9 @@ class PPO_Meta_Learner:
                         transitions[agent_id_terminated]['obs_buf'][agent_ptr[agent_id_terminated]] = init_state
                         transitions[agent_id_terminated]['acts_buf'][agent_ptr[agent_id_terminated]] = action
                         transitions[agent_id_terminated]['values_buf'][agent_ptr[agent_id_terminated]] = value
-                        transitions[agent_id_terminated]['act_log_prob_buf'][agent_ptr[agent_id_terminated]] = action_log_probs
+                        transitions[agent_id_terminated]['act_log_prob_buf'][
+                            agent_ptr[agent_id_terminated]] = action_log_probs
                         transitions[agent_id_terminated]['entropies_buf'][agent_ptr[agent_id_terminated]] = entropies
-
-                # Create the buffers
-                finished_obs_buf = np.zeros([buffer_size, self.obs_space], dtype=np.float32)
-                finished_next_obs_buf = np.zeros([buffer_size, self.obs_space], dtype=np.float32)
-                finished_acts_buf = np.zeros([buffer_size, len(self.action_space)], dtype=np.float32)
-                finished_log_probs_buf = np.zeros([buffer_size, len(self.action_space)], dtype=np.float32)
-                finished_rews_buf = np.zeros([buffer_size], dtype=np.float32)
-                finished_values_buf = np.zeros([buffer_size], dtype=np.float32)
-                finished_done_buf = np.zeros([buffer_size], dtype=np.float32)
-                finished_adv_buf = np.zeros([buffer_size], dtype=np.float32)
-                finished_entropies_buf = np.zeros([buffer_size, len(self.action_space)], dtype=np.float32)
-
 
             # Step environment
             next_experiences = self.step_env(self.env, np.array(actions))
@@ -392,13 +357,14 @@ class PPO_Meta_Learner:
                 if done or agent_ptr[agent_id] == time_horizon - 1:
                     # If the corresponding agent is done or trajectory is max length
                     with torch.no_grad():
-                        dists, value = self.actor_critic.forward(np.array(next_obs))
+                        next_obs_tensor = torch_from_np(np.array(next_obs), self.device)
+                        dists, value = self.actor_critic.policy(next_obs_tensor)
                         action = [dist.sample() for dist in dists]
                         entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                         action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
                                             zip(dists, action)]
                         next_action = [action_branch.detach().cpu().numpy() for action_branch in action]
-                        actions[agent_id_decisions] = action
+                        actions[agent_id] = action
                         value = value.detach().cpu().numpy()
 
                     transitions[agent_id]['act_log_prob_buf'][agent_ptr[agent_id]] = action_log_probs
@@ -407,7 +373,7 @@ class PPO_Meta_Learner:
 
                     actions[agent_id] = next_action
 
-                    if agent_ptr[agent_id] + buffer_length >= buffer_size:
+                    if agent_ptr[agent_id] + buffer_length >= buffer.max_buffer_size:
                         buffer_finished = True
                         break
                     if done:
@@ -420,16 +386,15 @@ class PPO_Meta_Learner:
                     advantages = self.get_gae(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1],
                                               transitions[agent_id]['values_buf'][:agent_ptr[agent_id] + 1])
 
-                    for i in range(agent_ptr[agent_id] + 1):  # For every experiences store it in buffer
-                        finished_obs_buf[i + buffer_length] = transitions[agent_id]['obs_buf'][i]
-                        finished_acts_buf[i + buffer_length] = transitions[agent_id]['acts_buf'][i]
-                        finished_rews_buf[i + buffer_length] = transitions[agent_id]['rews_buf'][i]
-                        finished_values_buf[i + buffer_length] = transitions[agent_id]['values_buf'][i]
-                        finished_next_obs_buf[i + buffer_length] = transitions[agent_id]['n_obs_buf'][i]
-                        finished_done_buf[i + buffer_length] = transitions[agent_id]['done_buf'][i]
-                        finished_log_probs_buf[i + buffer_length] = transitions[agent_id]['act_log_prob_buf'][i]
-                        finished_adv_buf[i + buffer_length] = advantages[i]
-                        finished_entropies_buf[i + buffer_length] = transitions[agent_id]['entropies_buf'][i]
+                    buffer.store(transitions[agent_id]['obs_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['acts_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['n_obs_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['done_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['values_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['entropies_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['act_log_prob_buf'][:agent_ptr[agent_id] + 1],
+                                 advantages[:agent_ptr[agent_id] + 1])
 
                     buffer_length += agent_ptr[agent_id] + 1
 
@@ -456,7 +421,8 @@ class PPO_Meta_Learner:
                     transitions[agent_id]['obs_buf'][agent_ptr[agent_id]] = next_obs
 
                     with torch.no_grad():
-                        dists, value = self.actor_critic.forward(np.array(next_obs))
+                        next_obs_tensor = torch_from_np(np.array(next_obs), self.device)
+                        dists, value = self.actor_critic.policy(next_obs_tensor)
                         action = [dist.sample() for dist in dists]
                         entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
                         action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
@@ -476,32 +442,27 @@ class PPO_Meta_Learner:
         print("Current mean Episode Length: " + str(np.mean(episode_lengths)))
 
         self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
-
         self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(episode_lengths),
                                self.meta_step)
 
-        print("Generated buffer of lenth: {} in {:.3f} secs.".format(buffer_length, time.time()-start_time))
+        print("Generated buffer of lenth: {} in {:.3f} secs.".format(buffer_length, time.time() - start_time))
 
-        return {'obs': finished_obs_buf[:buffer_length], 'acts': finished_acts_buf[:buffer_length],
-                'rews': finished_rews_buf[:buffer_length], 'advs': finished_adv_buf[:buffer_length],
-                'n_obs': finished_next_obs_buf[:buffer_length], 'dones': finished_done_buf[:buffer_length],
-                'log_probs': finished_log_probs_buf[:buffer_length], 'entropies': finished_entropies_buf[:buffer_length],
-                'values': finished_values_buf[:buffer_length]}, buffer_length
-
-    def train(self, env: UnityEnvironment, max_steps: int = 1000000, buffer_size: int = 10000, time_horizon: int = 512, batch_size: int = 512):
+    def train(self, max_steps: int = 1000000, buffer_size: int = 4096, time_horizon: int = 256,
+              batch_size: int = 512, gamma: float = 0.99, beta: float =0.005, lambd: float = 0.95, epsilon: float= 0.2):
         step = 0
-        self.set_environment(env)
-        self.init_network_and_optim()
         while step < max_steps:
             print("Current step: " + str(step))
-            buffer, buffer_length = self.generate_and_fill_buffer(buffer_size=buffer_size, time_horizon=time_horizon)
+            buffer = PPOBuffer(buffer_size=buffer_size)
+            self.generate_and_fill_buffer(buffer=buffer, time_horizon=time_horizon)
+            buffer_length = len(buffer)
+            print(buffer_length)
             step += buffer_length
             epochs = 3
-            p_losses , v_losses, entropies, kls = [], [], [], []
+            p_losses, v_losses, entropies, kls = [], [], [], []
             for i in range(epochs):
-                batches = self.split_buffer_into_batches(buffer, batch_size=batch_size)
+                batches = buffer.split_into_batches(batch_size=batch_size)
                 for batch in batches:
-                    loss, p_loss, v_loss, entropy, kl = self.calc_loss(batch, epsilon=0.2, beta=0.001, lambd=0.99)
+                    loss, p_loss, v_loss, entropy, kl = self.calc_loss(batch, gamma=gamma,epsilon=epsilon, beta=beta, lambd=lambd)
                     p_losses.append(p_loss)
                     v_losses.append(v_loss)
                     entropies.append(entropy)
@@ -514,13 +475,14 @@ class PPO_Meta_Learner:
 
             self.meta_step += 1
             self.learning_rate_scheduler.step()
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Entropy ', np.mean(entropies), self.meta_step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss ', np.mean(p_losses), self.meta_step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Value Loss ', np.mean(v_losses), self.meta_step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', np.mean(kls), self.meta_step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Entropy ', np.mean(entropies), step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss ', np.mean(p_losses), step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Value Loss ', np.mean(v_losses), step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', np.mean(kls),
+                                   self.meta_step)
 
 
-writer = SummaryWriter("results")
+writer = SummaryWriter("results/run5")
 
 ppo_module = PPO_Meta_Learner('cpu', writer=writer)
 
@@ -529,9 +491,24 @@ engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
 
 env_parameters_channel = EnvironmentParametersChannel()
 env_parameters_channel.set_float_parameter("seed", 5.0)
-env = UnityEnvironment(file_name="Training/Maze",
+env = UnityEnvironment(file_name="mFindTarget_new/RLProject.exe",
                        base_port=5000, timeout_wait=120,
                        no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
 
-ppo_module.train(env, 1000000, buffer_size=3000)
+max_steps = 1000000
+buffer_size = 5000 # Typical range: 2048 - 409600 -> Larger increases stability
+learning_rate = 0.0001 # Typical range: 0.00001 - 0.001
+batch_size = 512 # Typical range: 32-512
+network_num_hidden_layers = 2
+network_layer_size = 256
+time_horizon = 512
+gamma= 0.99
 
+beta = 0.005 # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
+epsilon = 0.2 # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability
+lambd = 0.95 # Typical range: 0.9 - 0.95 GAE Parameter
+num_epochs = 3 # Typical range: 3 - 10
+
+ppo_module.set_environment(env)
+ppo_module.init_network_and_optim(learning_rate_steps=max_steps/buffer_size)
+ppo_module.train(max_steps=max_steps, buffer_size=buffer_size, time_horizon=time_horizon, batch_size=batch_size, beta=beta, gamma=gamma, epsilon=epsilon, lambd=lambd)

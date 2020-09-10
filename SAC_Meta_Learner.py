@@ -12,7 +12,7 @@ from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
 from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
-from Buffer import Buffer
+from buffers import SACBuffer
 from models import ActorCriticPolicy, PolicyValueNetwork, ValueNetwork
 from utils import torch_from_np, break_into_branches, condense_q_stream
 
@@ -26,10 +26,10 @@ class TorchNetworks:
         self.init_entropy_coeff = 0.2  # Typical range: 0.05 - 0.5
         self.policy_network = ActorCriticPolicy(obs_dim, act_dim, 256, device=device).to(device)  # Pi
 
-        self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers, device=device).to(
+        self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers).to(
             device)  # Q
 
-        self.target_network = ValueNetwork(obs_dim, 1, hidden_size, num_hidden_layers, device=device).to(device)  # V
+        self.target_network = ValueNetwork(obs_dim, 1, hidden_size, num_hidden_layers).to(device)  # V
 
         self.soft_update(self.policy_network, self.target_network, 1.0)
 
@@ -63,10 +63,10 @@ class SAC_Meta_Learner:
         self.policy: ActorCriticPolicy
 
     def init_networks_and_optimizers(self, hidden_size: int = 256, hidden_layers: int = 2, total_steps: int = 100000,
-                                     learning_rate: float = 0.0003, device: str = 'cpu'):
+                                     learning_rate: float = 0.0003):
         obs_dim = self.obs_space
         action_dim = self.action_space
-        self.networks = TorchNetworks(obs_dim, action_dim, hidden_size, hidden_layers, device)
+        self.networks = TorchNetworks(obs_dim, action_dim, hidden_size, hidden_layers, self.device)
         self.policy = self.networks.policy_network
 
         value_parameters = list(self.networks.value_network.parameters()) + list(self.policy.critic.parameters())
@@ -76,10 +76,11 @@ class SAC_Meta_Learner:
         self.value_optimizer = optim.Adam(value_parameters, lr=learning_rate)
         self.entropy_optimizer = optim.Adam([self.networks.log_entropy_coeff], lr=learning_rate)
 
-        lambda2 = lambda epoch: -learning_rate * epoch / total_steps + learning_rate
-        self.learning_rate_scheduler_p = optim.lr_scheduler.LambdaLR(self.policy_optimizer, lr_lambda=lambda2)
-        self.learning_rate_scheduler_v = optim.lr_scheduler.LambdaLR(self.value_optimizer, lr_lambda=lambda2)
-        self.learning_rate_scheduler_e = optim.lr_scheduler.LambdaLR(self.entropy_optimizer, lr_lambda=lambda2)
+        linear_schedule = lambda epoch: (1 - epoch / max_steps)
+
+        self.learning_rate_scheduler_p = optim.lr_scheduler.LambdaLR(self.policy_optimizer, lr_lambda=linear_schedule)
+        self.learning_rate_scheduler_v = optim.lr_scheduler.LambdaLR(self.value_optimizer, lr_lambda=linear_schedule)
+        self.learning_rate_scheduler_e = optim.lr_scheduler.LambdaLR(self.entropy_optimizer, lr_lambda=linear_schedule)
 
     def set_environment(self, env):
         env.reset()
@@ -129,7 +130,7 @@ class SAC_Meta_Learner:
 
             for agent_id_terminated in terminal_steps:
                 agents_transitions[agent_id_terminated] = [terminal_steps[agent_id_terminated].obs,
-                                                           terminal_steps[agent_id_terminated].reward, True]
+                                                           terminal_steps[agent_id_terminated].reward, not terminal_steps[agent_id_terminated].interrupted]
 
         return agents_transitions
 
@@ -211,9 +212,9 @@ class SAC_Meta_Learner:
         entropy_loss = -1 * torch.mean(torch.mean(self.networks.log_entropy_coeff * branched_ent_sums, axis=1), axis=0)
         return entropy_loss
 
-    def calc_losses(self, batch: Buffer):
-        observations = batch.observations
-        next_observations = batch.next_observations
+    def calc_losses(self, batch: SACBuffer):
+        observations = torch_from_np(batch.observations, self.device)
+        next_observations = torch_from_np(batch.next_observations, self.device)
         rewards = torch_from_np(batch.rewards, self.device)
         dones = torch_from_np(batch.done, self.device)
 
@@ -285,11 +286,6 @@ class SAC_Meta_Learner:
                             'obs_buf': np.zeros([time_horizon, self.obs_space], dtype=np.float32),
                             'n_obs_buf': np.zeros([time_horizon, self.obs_space], dtype=np.float32),
                             'acts_buf': np.zeros([time_horizon, len(self.action_space)], dtype=np.float32),
-                            'act_log_prob_buf': np.zeros([time_horizon, len(self.action_space)],
-                                                         dtype=np.float32),
-                            'entropies_buf': np.zeros([time_horizon, len(self.action_space)],
-                                                      dtype=np.float32),
-                            'values_buf': np.zeros([time_horizon], dtype=np.float32),
                             'rews_buf': np.zeros([time_horizon], dtype=np.float32),
                             'done_buf': np.zeros([time_horizon], dtype=np.float32)}
 
@@ -298,44 +294,28 @@ class SAC_Meta_Learner:
                         init_state = flatten(init_state)
                         with torch.no_grad():
                             init_state = np.array(init_state)
-                            dists = self.policy.actor(init_state)
-                            value = self.policy.critic(init_state)
+                            init_state_tensor = torch_from_np(init_state, device=self.device)
+                            dists = self.policy.actor(init_state_tensor)
                             action = [dist.sample() for dist in dists]
-                            entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
-                            action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
-                                                zip(dists, action)]
                             action = [action_branch.detach().cpu().numpy() for action_branch in action]
                             actions[agent_id_decisions] = action
-                            value = value.detach().cpu().numpy()
 
                         transitions[agent_id_decisions]['obs_buf'][agent_ptr[agent_id_decisions]] = init_state
                         transitions[agent_id_decisions]['acts_buf'][agent_ptr[agent_id_decisions]] = action
-                        transitions[agent_id_decisions]['act_log_prob_buf'][
-                            agent_ptr[agent_id_decisions]] = action_log_probs
-                        transitions[agent_id_decisions]['values_buf'][agent_ptr[agent_id_decisions]] = value
-                        transitions[agent_id_decisions]['entropies_buf'][agent_ptr[agent_id_decisions]] = entropies
 
                     for agent_id_terminated in terminal_steps:
                         init_state = terminal_steps[agent_id_terminated].obs
                         init_state = flatten(init_state)
                         with torch.no_grad():
                             init_state = np.array(init_state)
-                            dists = self.policy.actor(init_state)
-                            value = self.policy.critic(init_state)
-                            entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
+                            init_state_tensor = torch_from_np(init_state, device=self.device)
+                            dists = self.policy.actor(init_state_tensor)
                             action = [dist.sample() for dist in dists]
-                            action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
-                                                zip(dists, action)]
                             action = [action_branch.detach().cpu().numpy() for action_branch in action]
-                            value = value.detach().cpu().numpy()
 
                         actions[agent_id_terminated] = action
                         transitions[agent_id_terminated]['obs_buf'][agent_ptr[agent_id_terminated]] = init_state
                         transitions[agent_id_terminated]['acts_buf'][agent_ptr[agent_id_terminated]] = action
-                        transitions[agent_id_terminated]['values_buf'][agent_ptr[agent_id_terminated]] = value
-                        transitions[agent_id_terminated]['act_log_prob_buf'][
-                            agent_ptr[agent_id_terminated]] = action_log_probs
-                        transitions[agent_id_terminated]['entropies_buf'][agent_ptr[agent_id_terminated]] = entropies
 
             # Step environment
             next_experiences = self.step_env(self.env, np.array(actions))
@@ -360,20 +340,13 @@ class SAC_Meta_Learner:
                     # If the corresponding agent is done or trajectory is max length
                     with torch.no_grad():
                         next_obs_tmp = np.array(next_obs)
-                        dists = self.policy.actor(next_obs_tmp)
-                        value = self.policy.critic(next_obs_tmp)
+                        next_obs_tensor = torch_from_np(next_obs_tmp, device=self.device)
+
+                        dists = self.policy.actor(next_obs_tensor)
 
                         action = [dist.sample() for dist in dists]
-                        entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
-                        action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
-                                            zip(dists, action)]
                         next_action = [action_branch.detach().cpu().numpy() for action_branch in action]
-                        actions[agent_id_decisions] = action
-                        value = value.detach().cpu().numpy()
-
-                    transitions[agent_id]['act_log_prob_buf'][agent_ptr[agent_id]] = action_log_probs
-                    transitions[agent_id]['values_buf'][agent_ptr[agent_id]] = value
-                    transitions[agent_id]['entropies_buf'][agent_ptr[agent_id]] = entropies
+                        actions[agent_id] = action
 
                     actions[agent_id] = next_action
 
@@ -388,6 +361,7 @@ class SAC_Meta_Learner:
                     for i in range(agent_ptr[agent_id] + 1):
                         # Store all experiences of the agent in the buffer
                         appended_steps += 1
+
                         if buffer.observations is None:
                             buffer.observations = transitions[agent_id]['obs_buf'][i]
                             buffer.actions = transitions[agent_id]['acts_buf'][i]
@@ -422,13 +396,6 @@ class SAC_Meta_Learner:
                         [time_horizon, self.obs_space], dtype=np.float32)
                     transitions[agent_id]['done_buf'] = np.zeros([time_horizon],
                                                                  dtype=np.float32)
-                    transitions[agent_id]['act_log_prob_buf'] = np.zeros(
-                        [time_horizon, len(self.action_space)],
-                        dtype=np.float32)
-                    transitions[agent_id]['entropies_buf'] = np.zeros(
-                        [time_horizon, len(self.action_space)],
-                        dtype=np.float32)
-
                     agent_ptr[agent_id] = 0
 
                 else:  # If the corresponding agent is not done, continue
@@ -437,20 +404,13 @@ class SAC_Meta_Learner:
 
                     with torch.no_grad():
                         obs = np.array(next_obs)
-                        dists = self.policy.actor(obs)
-                        value = self.policy.critic(obs)
+                        obs_tensor = torch_from_np(obs, device=self.device)
+                        dists = self.policy.actor(obs_tensor)
                         action = [dist.sample() for dist in dists]
-                        entropies = [dist.entropy().detach().cpu().numpy() for dist in dists]
-                        action_log_probs = [dist.log_prob(s_action).detach().cpu().numpy() for dist, s_action in
-                                            zip(dists, action)]
                         next_action = [action_branch.detach().cpu().numpy() for action_branch in action]
                         actions[agent_id_decisions] = action
-                        value = value.detach().cpu().numpy()
 
-                    transitions[agent_id]['entropies_buf'][agent_ptr[agent_id]] = entropies
                     transitions[agent_id]['acts_buf'][agent_ptr[agent_id]] = next_action
-                    transitions[agent_id]['values_buf'][agent_ptr[agent_id]] = value
-                    transitions[agent_id]['act_log_prob_buf'][agent_ptr[agent_id]] = action_log_probs
                     actions[agent_id] = next_action
 
             first_iteration = False
@@ -479,13 +439,13 @@ env = UnityEnvironment(file_name="mFindTarget_new/RLProject.exe",
                        no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
 
 sac_module.set_environment(env)
-sac_module.init_networks_and_optimizers(device='cuda')
+sac_module.init_networks_and_optimizers(hidden_layers=2, hidden_size=256, learning_rate=0.0003)
 steps = 0
 max_steps = 1000000
-replay_buffer = Buffer(action_space=sac_module.action_space)
+replay_buffer = SACBuffer(action_space=sac_module.action_space)
 
 while steps < max_steps:
-    buffer, steps_taken = sac_module.generate_trajectories(replay_buffer, 2000)
+    buffer, steps_taken = sac_module.generate_trajectories(replay_buffer, 2000, time_horizon=128)
     print("Steps taken since last update: {}".format(steps_taken))
     update_steps = 0
     frame_start = time.time()
@@ -505,6 +465,8 @@ while steps < max_steps:
         sac_module.policy_optimizer.step()
         sac_module.value_optimizer.step()
         sac_module.entropy_optimizer.step()
+
+        sac_module.networks.soft_update(sac_module.networks.policy_network.critic, sac_module.networks.target_network, tau=0.005)
 
         update_steps += 1
     frame_end = time.time()

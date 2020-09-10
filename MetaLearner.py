@@ -21,14 +21,6 @@ from ActionFlattener import ActionFlattener
 from Curiosity import CuriosityModule
 from DQNMetaLearner import DQN_Meta_Learner
 
-## Noisy Network
-
-
-
-## DQN-Rainbow Agent
-
-
-
 # Seed Torch Function
 def seed_torch(seed):
     torch.manual_seed(seed)
@@ -38,8 +30,7 @@ def seed_torch(seed):
 
 # Get inital configs
 class MetaLearner():
-    def __init__(self, policy: DQN_Meta_Learner, writer: SummaryWriter, tasks: [UnityEnvironment], enable_curiosity: bool = True, seed_env: bool = False, meta_lr: float = 0.01):
-        self.policy = policy
+    def __init__(self, writer: SummaryWriter, tasks: [UnityEnvironment], enable_curiosity: bool = True, seed_env: bool = False, meta_lr: float = 0.01):
         self.seed_env = seed_env
         self.tasks = tasks
         self.meta_lr = meta_lr
@@ -47,12 +38,13 @@ class MetaLearner():
         if seed_env:
             self.seed = 0
         self.flattener, self.action_space, self.obs_dim = self.get_obs_and_act(tasks[0])
-        self.curiosity = CuriosityModule(obs_size=self.obs_dim, writer=writer,enc_size=64, enc_layers=2,
-                                    device=policy.device, action_flattener=self.flattener)
+        self.enable_curiosity = enable_curiosity
+        if(self.enable_curiosity):
+            self.curiosity = CuriosityModule(obs_size=self.obs_dim, writer=writer, enc_size=64, enc_layers=2,
+                                        device=device, action_flattener=self.flattener)
         self.init_learning(self.flattener, self.obs_dim)
 
 
-        self.enable_curiosity = enable_curiosity
 
     def get_obs_and_act(self, env: UnityEnvironment):
         env.reset()

@@ -301,7 +301,8 @@ class DQN_Meta_Learner:
 
             for agent_id_terminated in terminal_steps:
                 agents_transitions[agent_id_terminated] = [terminal_steps[agent_id_terminated].obs,
-                                                           terminal_steps[agent_id_terminated].reward, True]
+                                                           terminal_steps[agent_id_terminated].reward,
+                                                           not terminal_steps[agent_id_terminated].interrupted]
 
         return agents_transitions
 
