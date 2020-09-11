@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from Swish import swish
 from torch.utils.tensorboard import SummaryWriter
+
+from utils import Swish
 
 class CuriosityModule():
     def __init__(self, obs_size: int,writer: SummaryWriter, enc_size: int, enc_layers: int, device: torch.device, action_flattener, learning_rate: int = 0.001):

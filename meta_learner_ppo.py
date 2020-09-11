@@ -15,8 +15,7 @@ from mlagents_envs.side_channel.environment_parameters_channel import Environmen
 from utils import torch_from_np, get_probs_and_entropies
 from buffers import PPOBuffer
 from models import ActorCriticPolicy
-
-torch.backends.cudnn.benchmark = True
+from env_utils import step_env
 
 flatten = lambda l: [item for sublist in l for item in sublist]
 
@@ -113,20 +112,19 @@ class PPO_Meta_Learner:
         self.meta_step = 0
         self.actor_critic: ActorCriticPolicy
 
-    def set_environment(self, env):
-        env.reset()
-        self.env = env
-        self.task = 0
-        result = 0
-        for brain_name in self.env.behavior_specs:
-            # Set up flattened action space
-            branches = self.env.behavior_specs[brain_name].discrete_action_branches
-            for shape in self.env.behavior_specs[brain_name].observation_shapes:
-                if (len(shape) == 1):
-                    result += shape[0]
-        self.obs_space = result
-        self.action_space = branches
-        self.env.reset()
+    def init_network_and_optim(self, max_steps: int, hidden_size: int, num_hidden_layers: int, learning_rate: float):
+        obs_dim = self.obs_space
+        action_dim = self.action_space
+        print("Obs space detected as: " + str(self.obs_space))
+        print("Action space detected as: " + str(self.action_space))
+        self.actor_critic = ActorCriticPolicy(obs_dim, action_dim, hidden_size, num_hidden_layers, True).to(self.device)
+        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
+        linear_schedule = lambda epoch: (1 - epoch/max_steps)
+        self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
+
+    def get_state_dict(self):
+        return self.actor_critic.state_dict()
+
 
     def discount_rewards(self, r, gamma=0.99, value_next=0.0):
         """
@@ -222,36 +220,6 @@ class PPO_Meta_Learner:
 
         return loss, policy_loss.item(), value_loss.item(), entropy.item(), kullback_leibler.item()
 
-    def init_network_and_optim(self, learning_rate_steps: int = 1000, hidden_size: int = 256, num_hidden_layers = 2, learning_rate: float = 0.0003):
-        obs_dim = self.obs_space
-        action_dim = self.action_space
-        print("Obs space detected as: " + str(self.obs_space))
-        print("Action space detected as: " + str(self.action_space))
-        self.actor_critic = ActorCriticPolicy(obs_dim, action_dim, hidden_size, num_hidden_layers, True).to(self.device)
-        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
-        linear_schedule = lambda epoch: (1 - epoch/max_steps)
-        self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
-
-    def step_env(self, env: UnityEnvironment, actions: np.array):
-        agents_transitions = {}
-        for brain in env.behavior_specs:
-            actions = np.resize(actions,
-                                (len(env.get_steps(brain)[0]), len(env.behavior_specs[brain].discrete_action_branches)))
-            self.env.set_actions(brain, actions)
-            self.env.step()
-            decision_steps, terminal_steps = env.get_steps(brain)
-
-            for agent_id_decisions in decision_steps:
-                agents_transitions[agent_id_decisions] = [decision_steps[agent_id_decisions].obs,
-                                                          decision_steps[agent_id_decisions].reward, False]
-
-            for agent_id_terminated in terminal_steps:
-                agents_transitions[agent_id_terminated] = [terminal_steps[agent_id_terminated].obs,
-                                                           terminal_steps[agent_id_terminated].reward,
-                                                           not terminal_steps[agent_id_terminated].interrupted]
-
-        return agents_transitions
-
     def generate_and_fill_buffer(self, buffer: PPOBuffer, time_horizon=256) -> {}:
         start_time = time.time()
         env = self.env
@@ -336,7 +304,7 @@ class PPO_Meta_Learner:
                         transitions[agent_id_terminated]['entropies_buf'][agent_ptr[agent_id_terminated]] = entropies
 
             # Step environment
-            next_experiences = self.step_env(self.env, np.array(actions))
+            next_experiences = step_env(self.env, np.array(actions))
             # Create action vector to store actions
             actions = np.zeros((num_agents, len(self.action_space)))
 
@@ -509,6 +477,6 @@ epsilon = 0.2 # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increas
 lambd = 0.95 # Typical range: 0.9 - 0.95 GAE Parameter
 num_epochs = 3 # Typical range: 3 - 10
 
-ppo_module.set_environment(env)
+ppo_module.set_env_and_detect_spaces(env, task=0)
 ppo_module.init_network_and_optim(learning_rate_steps=max_steps/buffer_size)
 ppo_module.train(max_steps=max_steps, buffer_size=buffer_size, time_horizon=time_horizon, batch_size=batch_size, beta=beta, gamma=gamma, epsilon=epsilon, lambd=lambd)

@@ -16,10 +16,9 @@ from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
 from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
-
-from ActionFlattener import ActionFlattener
-from Curiosity import CuriosityModule
-from DQNMetaLearner import DQN_Meta_Learner
+from utils import ActionFlattener
+from curiosity_module import CuriosityModule
+from meta_learner_dqn import DQN_Meta_Learner
 
 # Seed Torch Function
 def seed_torch(seed):
@@ -136,7 +135,6 @@ class MetaLearner():
 
             self.policy.eval_policy(num_trajectories=20, max_trajectory_length=600, task=task_number)
             # Meta update step
-            algorithm = 'reptile'
 
             if algorithm == 'reptile':
                 # Meta update with SGD, change weights to theta_before weights and perform gradient step
@@ -163,6 +161,9 @@ class MetaLearner():
                     self.policy.dqn.zero_grad()
             elif algorithm == 'somaml':
                 pass
+            else:
+                print("Please enter a valid algorithm: somaml, fomaml or reptile")
+                exit(-1)
 
             self.policy.meta_step += 1
             print("Meta update performed in: {:0.3f}s".format(time.time()-meta_start))
@@ -183,14 +184,6 @@ tasks.append(
             UnityEnvironment(file_name="C:/Users/Sebastian/Desktop/RLUnity/Training/mMaze/RLProject",
                              base_port=5000, timeout_wait=120,
                              no_graphics=False, seed=seed, side_channels=[engine_configuration_channel, env_parameters_channel]))
-# engine_configuration_channel = EngineConfigurationChannel()
-# engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
-# tasks.append(
-#             UnityEnvironment(file_name="C:/Users/Sebastian/Desktop/RLUnity/Training/mCarryObject_new/RLProject",
-#                              base_port=6000, timeout_wait=120,
-#                              no_graphics=False, seed=seed, side_channels=[engine_configuration_channel]))
-
-
 
 # Get Cuda Infos
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
