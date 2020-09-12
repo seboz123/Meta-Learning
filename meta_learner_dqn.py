@@ -14,7 +14,7 @@ from mlagents_envs.environment import UnityEnvironment
 from torch.utils.tensorboard import SummaryWriter
 
 from buffers import DQNBuffer, PrioritizedDQNBuffer
-from utils import ActionFlattener
+from utils import ActionFlattener, torch_from_np
 from env_utils import step_env
 from models import DeepQNetwork
 
@@ -80,7 +80,7 @@ class DQN_Meta_Learner:
 
         linear_schedule = lambda epoch: (1 - epoch / max_scheduler_steps)
 
-        self.learning_rate_scheduler_p = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
+        self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
 
     def set_env_and_detect_spaces(self, env, task):
         env.reset()
@@ -108,24 +108,26 @@ class DQN_Meta_Learner:
     def get_state_dict(self):
         return [self.dqn.state_dict(), self.dqn_target.state_dict()]
 
-    def select_action(self, state: np.ndarray) -> np.ndarray:
+    def select_action(self, state: np.ndarray, epsilon, device) -> np.ndarray:
         """Select an action from the input state."""
         # NoisyNet: no epsilon greedy action selection
-        selected_action = self.dqn(
-            torch.FloatTensor(state).to(self.device)
-        ).argmax()
-        selected_action = selected_action.detach().cpu().numpy()
+        with torch.no_grad():
+            state_tensor = torch_from_np(state, device)
+            selected_action = self.dqn(state_tensor).detach().cpu().numpy()[0]
+            if np.random.random(1) > epsilon:
+                selected_action = selected_action.argmax()
+            else:
+                selected_action = np.random.randint(0, len(selected_action))
 
         return selected_action
 
 
-    def calc_loss(self, memory, memory_n, n_step: int) -> [torch.Tensor, torch.Tensor, np.ndarray]:
+    def calc_loss(self, memory, memory_n, batch_size: int,n_step: int) -> [torch.Tensor, torch.Tensor, np.ndarray]:
         use_n_step = True if n_step > 1 else False
 
-        samples = memory.sample_batch(self.beta)
-        weights = torch.FloatTensor(
-            samples["weights"].reshape(-1, 1)
-        ).to(self.device)
+        samples = memory.sample_batch(batch_size=batch_size, beta=self.beta)
+        weights = torch_from_np(samples["weights"].reshape(-1, 1), self.device)
+
         indices = samples["indices"]
         # 1-step Learning loss
         elementwise_loss = self._compute_dqn_loss(samples, self.gamma)
@@ -156,15 +158,12 @@ class DQN_Meta_Learner:
         self.dqn.reset_noise()
         self.dqn_target.reset_noise()
 
-    def generate_and_fill_buffer(self, buffer_size, n_step, batch_size, max_trajectory_length=600):
-        if (buffer_size <= batch_size):
-            raise ValueError
+    def generate_and_fill_buffer(self, buffer_size, time_horizon, epsilon,max_trajectory_length=600):
         start_time = time.time()
         env = self.env
         env.reset()
 
         # Create transition dict
-        experiences = {}
         transitions = {}
 
         buffer_length = 0
@@ -173,17 +172,22 @@ class DQN_Meta_Learner:
         rewards = []
         trajectory_lengths = []
 
-        while buffer_length < buffer_size:
+        buffer_filled = False
+
+        while not buffer_filled:
             if first_iteration:
                 for brain in env.behavior_specs:
                     decision_steps, terminal_steps = env.get_steps(brain)
                     num_agents = len(decision_steps)
+                    if (num_agents == 0):
+                        env.reset()
+                        decision_steps, terminal_steps = env.get_steps(brain)
+                        num_agents = len(decision_steps)
                     actions = np.zeros((num_agents, 1))
                     print("Brain :" + str(brain) + " with " + str(num_agents) + " agents detected.")
                     agent_ptr = [0 for _ in range(num_agents)]  # Create pointer for agent transitions
 
                     for i in range(num_agents):
-                        experiences[i] = [[], 0, 0, [], False]
                         transitions[i] = {'obs_buf': np.zeros([max_trajectory_length, self.obs_dim], dtype=np.float32),
                                           'n_obs_buf': np.zeros([max_trajectory_length, self.obs_dim],
                                                                 dtype=np.float32),
@@ -195,18 +199,16 @@ class DQN_Meta_Learner:
                     for agent_id_decisions in decision_steps:
                         init_state = decision_steps[agent_id_decisions].obs
                         init_state = flatten(init_state)
-                        action = self.select_action(init_state)
+                        action = self.select_action(init_state, epsilon, self.device)
                         actions[agent_id_decisions] = action
-                        experiences[agent_id_decisions][0] = init_state
                         transitions[agent_id_decisions]['obs_buf'][0] = init_state
                         transitions[agent_id_decisions]['acts_buf'][0] = action
 
                     for agent_id_terminated in terminal_steps:
                         init_state = terminal_steps[agent_id_terminated].obs
                         init_state = flatten(init_state)
-                        action = self.select_action(init_state)
+                        action = self.select_action(init_state, epsilon,self.device)
                         actions[agent_id_terminated] = action
-                        experiences[agent_id_terminated][0] = init_state
                         transitions[agent_id_terminated]['obs_buf'][0] = init_state
                         transitions[agent_id_terminated]['acts_buf'][0] = action
 
@@ -215,11 +217,6 @@ class DQN_Meta_Learner:
                 acts_buf = np.zeros([buffer_size], dtype=np.float32)
                 rews_buf = np.zeros([buffer_size], dtype=np.float32)
                 done_buf = np.zeros([buffer_size], dtype=np.float32)
-            else:
-                for agent in experiences:
-                    # Set Observation and Action to the last next_obs and the selected action for the observation
-                    experiences[agent][0] = experiences[agent][3]  # obs = next_obs
-                    experiences[agent][1] = actions[int(agent)]  # action = action_vector[]
 
             # Create Action vector
             action_vector = [self.flattener.lookup_action(int((action))) for action in actions]
@@ -229,16 +226,11 @@ class DQN_Meta_Learner:
             actions = np.zeros((num_agents, 1))
 
             for agent_id in next_experiences:
-                if buffer_length >= buffer_size:
+                if buffer_filled:
                     break
                 reward = next_experiences[agent_id][1]  # Reward
                 next_obs = flatten(next_experiences[agent_id][0])  # Next_obs
                 done = next_experiences[agent_id][2]  # Done
-
-                # Store 1-step-experience of every agent_id {agent_id0:[obs,act,rew,n_obs,done] agent_id1: ....}
-                experiences[agent_id][2] = reward
-                experiences[agent_id][3] = next_obs
-                experiences[agent_id][4] = done
                 # Store trajectory of every Agent {Agent0:[obs,act,rew,n_obs,done,obs,act,rew,n_obs,done,.... Agent1: ....}
                 transitions[agent_id]['rews_buf'][agent_ptr[agent_id]] = reward
                 transitions[agent_id]['n_obs_buf'][agent_ptr[agent_id]] = next_obs
@@ -247,16 +239,18 @@ class DQN_Meta_Learner:
                 if not done:  # If the corresponding agent is not done yet, select and action and continue
                     agent_ptr[agent_id] += 1
                     transitions[agent_id]['obs_buf'][agent_ptr[agent_id]] = next_obs
-                    next_action = int(self.select_action(next_obs))  # Action of next step
+                    next_action = int(self.select_action(next_obs, epsilon,self.device))  # Action of next step
                     actions[agent_id] = next_action
                     transitions[agent_id]['acts_buf'][agent_ptr[agent_id]] = next_action
                 else:  # If the corresponding agent is done, store the trajectory into obs_buf, rews_buf...
-                    next_action = int(self.select_action(next_obs))
+                    next_action = int(self.select_action(next_obs, epsilon,self.device))
                     actions[agent_id] = next_action
                     rewards.append(sum(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1]))
                     trajectory_lengths.append(agent_ptr[agent_id])
                     for i in range(agent_ptr[agent_id] + 1):  # For every experiences store it in buffer
                         if (i + buffer_length >= buffer_size):
+                            buffer_filled = True
+                            buffer_filled += i
                             break
                         obs_buf[i + buffer_length] = transitions[agent_id]['obs_buf'][i]
                         acts_buf[i + buffer_length] = transitions[agent_id]['acts_buf'][i]
@@ -264,7 +258,8 @@ class DQN_Meta_Learner:
                         n_obs_buf[i + buffer_length] = transitions[agent_id]['n_obs_buf'][i]
                         done_buf[i + buffer_length] = transitions[agent_id]['done_buf'][i]
 
-                    buffer_length += agent_ptr[agent_id] + 1
+                    if not buffer_filled:
+                        buffer_length += agent_ptr[agent_id] + 1
 
                     transitions[agent_id]['obs_buf'] = np.zeros(
                         [max_trajectory_length, self.obs_dim], dtype=np.float32)
@@ -283,15 +278,17 @@ class DQN_Meta_Learner:
         self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(trajectory_lengths),
                                self.meta_step)
 
-        use_n_step = True if n_step > 1 else False
+        use_n_step = True if time_horizon > 1 else False
 
         acion_dim = 1
-        per_dqn_buffer = PrioritizedDQNBuffer(obs_dim=self.obs_dim, action_dim=acion_dim, batch_size=batch_size, n_step=time_horizon, alpha=self.alpha
+        buffer_start = time.time()
+        per_dqn_buffer = PrioritizedDQNBuffer(size=buffer_length, obs_dim=self.obs_dim, action_dim=acion_dim, n_step=time_horizon, alpha=self.alpha
         )
-        n_dqn_buffer = DQNBuffer(
-            obs_dim=self.obs_dim, action_dim=acion_dim, batch_size=batch_size, n_step=time_horizon, gamma=self.gamma
+
+        n_dqn_buffer = DQNBuffer(size=buffer_length,
+            obs_dim=self.obs_dim, action_dim=acion_dim, n_step=time_horizon, gamma=self.gamma
         )
-        for ptr in range(len(rews_buf)):
+        for ptr in range(buffer_length):
             transition = [obs_buf[ptr], acts_buf[ptr], rews_buf[ptr], n_obs_buf[ptr], done_buf[ptr]]
             if use_n_step:
                 one_step_transition = n_dqn_buffer.store(*transition)
@@ -299,7 +296,7 @@ class DQN_Meta_Learner:
                 one_step_transition = transition
             if one_step_transition:
                 per_dqn_buffer.store(*one_step_transition)
-
+        print("Buffer storing took {}s".format(time.time()-buffer_start))
         print("Finished generating Buffer with size of: {} in {:.3f}s!".format(len(per_dqn_buffer), time.time() - start_time))
         return per_dqn_buffer, n_dqn_buffer, buffer_size
 
@@ -307,11 +304,11 @@ class DQN_Meta_Learner:
         """Return categorical dqn loss."""
 
         device = self.device  # for shortening the following lines
-        state = torch.FloatTensor(samples["obs"]).to(device)
-        next_state = torch.FloatTensor(samples["next_obs"]).to(device)
+        state = torch_from_np(samples["obs"], device)
+        next_state = torch_from_np(samples["next_obs"], device)
         action = torch.LongTensor(samples["acts"]).to(device)
-        reward = torch.FloatTensor(samples["rews"].reshape(-1, 1)).to(device)
-        done = torch.FloatTensor(samples["done"].reshape(-1, 1)).to(device)
+        reward = torch_from_np(samples["rews"].reshape(-1, 1), device)
+        done = torch_from_np(samples["done"].reshape(-1, 1), device)
 
         # Categorical DQN algorithm
         delta_z = float(self.v_max - self.v_min) / (self.atom_size - 1)
@@ -346,8 +343,6 @@ class DQN_Meta_Learner:
             )
 
         dist = self.dqn.dist(state)
-        # print(dist)
-        # print(action)
         log_p = torch.log(dist[range(len(action)), action])
         elementwise_loss = -(proj_dist * log_p).sum(1)
 
@@ -360,60 +355,84 @@ class DQN_Meta_Learner:
 
     def train(self, max_steps: int, buffer_size: int,batch_size: int, time_horizon: int, learning_rate: float, gamma: float, hidden_size: int,
               hidden_layers: int, v_max: int, v_min: int, atom_size: int, update_period: int, beta: float, alpha: float,
-              prior_eps: float):
+              prior_eps: float, epsilon: float):
 
         self.init_network_and_optim(hidden_size=hidden_size, network_num_hidden_layers=hidden_layers, learning_rate=learning_rate,
                                     beta=beta, prior_eps=prior_eps, alpha=alpha, gamma=gamma,
                                     v_max=v_max, v_min=v_min, atom_size=atom_size, max_scheduler_steps=100000)
+        self.meta_step = 0
 
         steps = 0
-
+        update_counter = 1
         while steps < max_steps:
-            memory, memory_n, buffer_length = self.generate_and_fill_buffer(buffer_size=buffer_size, batch_size=batch_size, n_step=time_horizon)
+            memory, memory_n, buffer_length = self.generate_and_fill_buffer(buffer_size=buffer_size,epsilon=epsilon, time_horizon=time_horizon)
+            steps += buffer_length
             print("Generated buffer of size: {}".format(buffer_length))
-            loss, elementwise_loss, indices = self.calc_loss(memory, memory_n, time_horizon)
 
-            if steps > update_period * 1:
-                self._target_hard_update()
+            ###### Update the model for every step taken ##########
+            for epoch in range(10):
+                loss, elementwise_loss, indices = self.calc_loss(memory, memory_n, batch_size=batch_size, n_step=time_horizon)
 
-            loss.backward()
+                print("Current Loss {} at step {}".format(loss.item(), steps))
+                if steps > update_period * update_counter:
+                    self._target_hard_update()
+                    update_counter += 1
 
-writer = SummaryWriter("results/dqn_1")
+                loss.backward()
+                self.optimizer.zero_grad()
+                self.optimizer.step()
+                self.learning_rate_scheduler.step()
+                ### Increase beta for PER
+                self.beta = self.beta + steps / max_steps * (1.0 - self.beta)
 
-dqn_module = DQN_Meta_Learner(device='cpu', writer=writer)
+                loss_for_prior = elementwise_loss.detach().cpu().numpy()
+                new_priorities = loss_for_prior + prior_eps
+                memory.update_priorities(indices, new_priorities)
+        self.meta_step += 1
 
-engine_configuration_channel = EngineConfigurationChannel()
-engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
 
-env_parameters_channel = EnvironmentParametersChannel()
-env_parameters_channel.set_float_parameter("seed", 5.0)
-env = UnityEnvironment(file_name="Training/Maze.app",
-                       base_port=5000, timeout_wait=120,
-                       no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
+if __name__ == '__main__':
 
-############ Hyperparameters DQN ##############
+    writer = SummaryWriter("results/dqn_1")
 
-max_steps = 1000000
-buffer_size = 5000 # Replay buffer size
-learning_rate = 0.0001 # Typical range: 0.00001 - 0.001
-batch_size = 512 # Typical range: 32-512
-network_num_hidden_layers = 2
-network_layer_size = 256
-time_horizon = 512
-gamma= 0.99
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-### DQN specific
+    dqn_module = DQN_Meta_Learner(device=device, writer=writer)
 
-v_max = 13
-v_min = -13
-atom_size = 51
-update_period = 5000
-beta = 0.5
-alpha = 0.7
-prior_eps = 1e-6
+    engine_configuration_channel = EngineConfigurationChannel()
+    engine_configuration_channel.set_configuration_parameters(time_scale=5.0)
 
-dqn_module.set_env_and_detect_spaces(env, task=0)
-dqn_module.train(max_steps=max_steps, buffer_size=buffer_size, batch_size=batch_size, time_horizon=time_horizon,
-                 learning_rate=learning_rate, gamma=gamma, hidden_size=network_layer_size, hidden_layers=network_layer_size,
-                 v_max=v_max, v_min=v_min, atom_size=atom_size, update_period=update_period, beta=beta, alpha=alpha,
-                 prior_eps=prior_eps)
+    env_parameters_channel = EnvironmentParametersChannel()
+    env_parameters_channel.set_float_parameter("seed", 5.0)
+    env = UnityEnvironment(file_name="Training/Maze.app",
+                           base_port=5000, timeout_wait=120,
+                           no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
+
+    ############ Hyperparameters DQN ##############
+
+    max_steps = 1000000
+    buffer_size = 2000 # Replay buffer size
+    learning_rate = 0.0001 # Typical range: 0.00001 - 0.001
+    batch_size = 512 # Typical range: 32-512
+    network_num_hidden_layers = 2
+    network_layer_size = 256
+    time_horizon = 512
+    gamma= 0.99
+
+    ### DQN specific
+
+    epsilon = 0.15
+    v_max = 13
+    v_min = -13
+    atom_size = 51
+    update_period = 5000
+    beta = 0.5
+    alpha = 0.7
+    prior_eps = 1e-6
+
+
+    dqn_module.set_env_and_detect_spaces(env, task=0)
+    dqn_module.train(max_steps=max_steps, buffer_size=buffer_size, batch_size=batch_size, time_horizon=time_horizon,
+                     learning_rate=learning_rate, gamma=gamma, hidden_size=network_layer_size, hidden_layers=network_layer_size,
+                     v_max=v_max, v_min=v_min, atom_size=atom_size, update_period=update_period, beta=beta, alpha=alpha,
+                     prior_eps=prior_eps, epsilon=epsilon)

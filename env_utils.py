@@ -15,8 +15,6 @@ def step_env(env: UnityEnvironment, actions: np.array):
                                                       decision_steps[agent_id_decisions].reward, False]
 
         for agent_id_terminated in terminal_steps:
-            if terminal_steps[agent_id_terminated].interrupted:
-                print("Interrupted")
             agents_transitions[agent_id_terminated] = [terminal_steps[agent_id_terminated].obs,
                                                        terminal_steps[agent_id_terminated].reward, True]
 

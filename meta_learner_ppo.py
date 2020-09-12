@@ -335,6 +335,9 @@ class PPO_Meta_Learner:
                         actions[agent_id] = action
                         value = value.detach().cpu().numpy()
 
+                        if agent_ptr[agent_id] == time_horizon - 1:
+                            transitions[agent_id]['rews_buf'][agent_ptr[agent_id]] = value
+
                     transitions[agent_id]['act_log_prob_buf'][agent_ptr[agent_id]] = action_log_probs
                     transitions[agent_id]['values_buf'][agent_ptr[agent_id]] = value
                     transitions[agent_id]['entropies_buf'][agent_ptr[agent_id]] = entropies

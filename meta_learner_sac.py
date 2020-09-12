@@ -337,10 +337,15 @@ class SAC_Meta_Learner:
 
                     actions[agent_id] = next_action
 
+                    if agent_ptr[agent_id] == time_horizon - 1:
+                        with torch.no_grad():
+                            next_obs_tmp = np.array(next_obs)
+                            next_obs_tensor = torch_from_np(next_obs_tmp, device=self.device)
+                            value_estimate = self.policy.critic(next_obs_tensor).detach().cpu().numpy()
+                            transitions[agent_id]['rews_buf'][agent_ptr[agent_id]] = value_estimate
+
+
                     if done:
-                        print(agent_current_step)
-                        print(current_added_reward)
-                        print("Agent finished in {} steps with an reward of {}".format(agent_current_step[agent_id], current_added_reward[agent_id]))
                         episode_lengths.append(agent_current_step[agent_id])
                         agent_current_step[agent_id] = 0
                         rewards.append(current_added_reward[agent_id])
@@ -506,7 +511,7 @@ learning_rate = 0.0001 # Typical range: 0.00001 - 0.001
 batch_size = 512 # Typical range: 32-512
 network_num_hidden_layers = 2
 network_layer_size = 256
-time_horizon = 512
+time_horizon = 100
 gamma= 0.99
 
 init_coeff = 0.5 # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence

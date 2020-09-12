@@ -134,7 +134,6 @@ class DQNBuffer:
             obs_dim: int,
             size: int,
             action_dim: int = 1,
-            batch_size: int = 32,
             n_step: int = 1,
             gamma: float = 0.99,
     ):
@@ -145,7 +144,7 @@ class DQNBuffer:
         self.done_buf = np.zeros(size, dtype=np.float32)
         self.use_act_prob = False
         self.act_prob_buf = np.zeros([size], dtype=np.float32) if action_dim == 1 else np.zeros([size, action_dim], dtype=np.float32)
-        self.max_size, self.batch_size = size, batch_size
+        self.max_size = size
         self.ptr, self.size, = 0, 0
 
 
@@ -263,7 +262,6 @@ class PrioritizedDQNBuffer(DQNBuffer):
             obs_dim: int,
             size: int,
             action_dim: int = 1,
-            batch_size: int = 32,
             alpha: float = 0.7,
             n_step: int = 1,
             gamma: float = 0.99,
@@ -272,7 +270,7 @@ class PrioritizedDQNBuffer(DQNBuffer):
         assert alpha >= 0
 
         super(PrioritizedDQNBuffer, self).__init__(
-            obs_dim, size, action_dim, batch_size, n_step, gamma
+            obs_dim, size, action_dim, n_step, gamma
         )
         self.max_priority, self.tree_ptr = 1.0, 0
         self.alpha = alpha
@@ -308,7 +306,7 @@ class PrioritizedDQNBuffer(DQNBuffer):
         assert len(self) >= batch_size
         assert beta > 0
 
-        indices = self._sample_proportional()
+        indices = self._sample_proportional(batch_size)
 
         obs = self.obs_buf[indices]
         next_obs = self.next_obs_buf[indices]
@@ -340,13 +338,13 @@ class PrioritizedDQNBuffer(DQNBuffer):
 
             self.max_priority = max(self.max_priority, priority)
 
-    def _sample_proportional(self) -> List[int]:
+    def _sample_proportional(self, batch_size: int) -> List[int]:
         """Sample indices based on proportions."""
         indices = []
         p_total = self.sum_tree.sum(0, len(self) - 1)
-        segment = p_total / self.batch_size
+        segment = p_total / batch_size
 
-        for i in range(self.batch_size):
+        for i in range(batch_size):
             a = segment * i
             b = segment * (i + 1)
             upperbound = random.uniform(a, b)
