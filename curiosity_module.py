@@ -6,17 +6,20 @@ from torch.utils.tensorboard import SummaryWriter
 from utils import Swish
 
 class CuriosityModule():
-    def __init__(self, obs_size: int,writer: SummaryWriter, enc_size: int, enc_layers: int, device: torch.device, action_flattener, learning_rate: int = 0.001):
+    def __init__(self, obs_size: int, enc_size: int, enc_layers: int, device: torch.device, action_flattener, learning_rate: int = 0.001):
         self.device = device
-        self.writer = writer
+
         self.encoderModel = VectorEncoder(obs_size, enc_size, enc_layers).to(device)
+
         self.forwardModel = ForwardModel(enc_size, sum(action_flattener.action_shape)).to(device)
         self.inverseModel = InverseModel(enc_size, action_flattener.action_shape, device).to(device)
-        self.flattener = action_flattener
+
+        # self.flattener = action_flattener
         parameters = list(self.forwardModel.parameters()) + list(self.inverseModel.parameters()) + list(self.encoderModel.parameters())
         self.optimizer = optim.Adam(parameters, lr=learning_rate)
-
-    def calc_loss(self, meta_step: int, task: int, memory_n, indices) -> torch.Tensor:
+        linear_schedule = lambda epoch: max((1 - epoch / max_scheduler_steps), 0.0001)
+        self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
+    def calc_loss(self, memory_n, indices) -> torch.Tensor:
         samples = memory_n.sample_batch_from_idxs(indices)
         action_shape = self.flattener.action_shape
         actions = []
@@ -54,32 +57,30 @@ class VectorEncoder(nn.Module):
             self,
             obs_size: int,
             enc_size: int,
-            enc_layers: int
+            num_layers: int,
+
     ):
         super(VectorEncoder, self).__init__()
-        self.layerIn = nn.Linear(obs_size, enc_size)
-        self.enc_layers = enc_layers
-        self.enc_size = enc_size
-        self.encoder_layer = nn.Linear(enc_size, enc_size)
+        layerIn = nn.Sequential(nn.Linear(obs_size, enc_size), Swish())
+        layers = []
+        for _ in range(num_layers-1):
+            layers.append(nn.Sequential(nn.Linear(enc_size, enc_size), Swish())
+        self.encoder = nn.Sequential(layerIn, *layers)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        enc = self.layerIn(obs)
-        enc = swish(enc, 1.0)
-        for i in range(self.enc_layers - 1):
-            enc = self.encoder_layer(enc)
-            enc = swish(enc, 1.0)
-        return enc
+        return self.encoder(obs)
 
 
 class ForwardModel(nn.Module):
     def __init__(
             self,
             enc_size: int,
-            act_size: int
+            act_size: int,
+            num_layers: int
     ):
         super(ForwardModel, self).__init__()
         self.layerIn = nn.Sequential(
-            nn.Linear(enc_size+act_size, 256),
+            nn.Linear(enc_size+act_size, enc_size),
         )
 
         self.layerOut = nn.Sequential(

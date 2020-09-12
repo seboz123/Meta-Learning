@@ -29,43 +29,11 @@ def seed_torch(seed):
 
 # Get inital configs
 class MetaLearner():
-    def __init__(self, writer: SummaryWriter, tasks: [UnityEnvironment], enable_curiosity: bool = True, seed_env: bool = False, meta_lr: float = 0.01):
-        self.seed_env = seed_env
-        self.tasks = tasks
-        self.meta_lr = meta_lr
-
-        if seed_env:
-            self.seed = 0
-        self.flattener, self.action_space, self.obs_dim = self.get_obs_and_act(tasks[0])
-        self.enable_curiosity = enable_curiosity
-        if(self.enable_curiosity):
-            self.curiosity = CuriosityModule(obs_size=self.obs_dim, writer=writer, enc_size=64, enc_layers=2,
-                                        device=device, action_flattener=self.flattener)
-        self.init_learning(self.flattener, self.obs_dim)
+    def __init__(self, writer: SummaryWriter):
 
 
 
-    def get_obs_and_act(self, env: UnityEnvironment):
-        env.reset()
-        result = 0
-        for brain_name in env.behavior_specs:
-            # Set up flattened action space
-            branches = env.behavior_specs[brain_name].discrete_action_branches
-            flattener = ActionFlattener(branches)
-            action_space = flattener.action_space
-            for shape in env.behavior_specs[brain_name].observation_shapes:
-                if (len(shape) == 1):
-                    result += shape[0]
-        obs_dim = result
-        env.reset()
-        return flattener, action_space, obs_dim
-
-    def init_learning(self, flattener: ActionFlattener, obs_dim: int):
-        self.policy.init_network_and_optim(obs_dim, flattener)
-        parameters = list(self.policy.dqn.parameters()) + list(self.curiosity.forwardModel.parameters())+ list(self.curiosity.inverseModel.parameters())
-        self.meta_optimizer = optim.Adam(parameters, lr=0.01)
-
-    def start_meta_learning(self, algorithm: str, num_meta_updates: int, buffer_size: int, max_trajectory_length: int, n_step: int, batch_size: int, epochs: int):
+    def meta_learn(self, algorithm: str, num_meta_updates: int, buffer_size: int, max_trajectory_length: int, n_step: int, batch_size: int, epochs: int):
         meta_start = time.time()
         start_time = time.localtime()
         start_time = time.strftime("%H:%M:%S", start_time)

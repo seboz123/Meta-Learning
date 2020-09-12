@@ -33,27 +33,10 @@ class DQN_Meta_Learner:
             writer: SummaryWriter,
 
     ):
-        """Initialization.
-
-        Args:
-            env (UnityEnvironment.env): UnityEnvironment
-            memory_size (int): length of memory
-            batch_size (int): batch size for sampling
-            target_update (int): period for target model's hard update
-            lr (float): learning rate
-            gamma (float): discount factor
-            alpha (float): determines how much prioritization is used
-            beta (float): determines how much importance sampling is used
-            prior_eps (float): guarantees every transition can be sampled
-            v_min (float): min value of support
-            v_max (float): max value of support
-            atom_size (int): the unit number of support
-            n_step (int): step number to calculate n-step td error
-        """
         self.device = device
         self.writer = writer
 
-    def init_network_and_optim(self, hidden_size: int, beta: float, prior_eps: float, network_num_hidden_layers: int,
+    def init_networks_and_optimizers(self, hidden_size: int, beta: float, prior_eps: float, network_num_hidden_layers: int,
                                max_scheduler_steps: int,v_max: int, v_min: int, atom_size: int, learning_rate: float,
                                gamma: float, alpha: float):
         # Categorical DQN parameters
@@ -78,7 +61,7 @@ class DQN_Meta_Learner:
         self.dqn_target.eval()
         self.optimizer = optim.Adam(self.dqn.parameters(), lr=learning_rate)
 
-        linear_schedule = lambda epoch: (1 - epoch / max_scheduler_steps)
+        linear_schedule = lambda epoch: max((1 - epoch / max_scheduler_steps), 1e-6)
 
         self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
 
@@ -207,7 +190,7 @@ class DQN_Meta_Learner:
                     for agent_id_terminated in terminal_steps:
                         init_state = terminal_steps[agent_id_terminated].obs
                         init_state = flatten(init_state)
-                        action = self.select_action(init_state, epsilon,self.device)
+                        action = self.select_action(init_state, epsilon, self.device)
                         actions[agent_id_terminated] = action
                         transitions[agent_id_terminated]['obs_buf'][0] = init_state
                         transitions[agent_id_terminated]['acts_buf'][0] = action
@@ -219,7 +202,7 @@ class DQN_Meta_Learner:
                 done_buf = np.zeros([buffer_size], dtype=np.float32)
 
             # Create Action vector
-            action_vector = [self.flattener.lookup_action(int((action))) for action in actions]
+            action_vector = [self.flattener.lookup_action(int(action)) for action in actions]
             # Step environment
             next_experiences = step_env(self.env, np.array(action_vector))
             # Create action vector to store actions
@@ -248,9 +231,8 @@ class DQN_Meta_Learner:
                     rewards.append(sum(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1]))
                     trajectory_lengths.append(agent_ptr[agent_id])
                     for i in range(agent_ptr[agent_id] + 1):  # For every experiences store it in buffer
-                        if (i + buffer_length >= buffer_size):
+                        if (agent_ptr[agent_id] + buffer_length >= buffer_size):
                             buffer_filled = True
-                            buffer_filled += i
                             break
                         obs_buf[i + buffer_length] = transitions[agent_id]['obs_buf'][i]
                         acts_buf[i + buffer_length] = transitions[agent_id]['acts_buf'][i]
@@ -274,14 +256,14 @@ class DQN_Meta_Learner:
                     agent_ptr[agent_id] = 0
             first_iteration = False
 
-        self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
-        self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(trajectory_lengths),
-                               self.meta_step)
+        # self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
+        # self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(trajectory_lengths),
+        #                        self.meta_step)
 
         use_n_step = True if time_horizon > 1 else False
 
         acion_dim = 1
-        buffer_start = time.time()
+        buffer_time = time.time()
         per_dqn_buffer = PrioritizedDQNBuffer(size=buffer_length, obs_dim=self.obs_dim, action_dim=acion_dim, n_step=time_horizon, alpha=self.alpha
         )
 
@@ -296,9 +278,8 @@ class DQN_Meta_Learner:
                 one_step_transition = transition
             if one_step_transition:
                 per_dqn_buffer.store(*one_step_transition)
-        print("Buffer storing took {}s".format(time.time()-buffer_start))
-        print("Finished generating Buffer with size of: {} in {:.3f}s!".format(len(per_dqn_buffer), time.time() - start_time))
-        return per_dqn_buffer, n_dqn_buffer, buffer_size
+        print("Finished generating Buffer with size of: {} in {:.3f}s! Storing took {:.3f}s".format(len(per_dqn_buffer), time.time() - start_time, time.time() - buffer_time))
+        return per_dqn_buffer, n_dqn_buffer
 
     def _compute_dqn_loss(self, samples: Dict[str, np.ndarray], gamma: float) -> torch.Tensor:
         """Return categorical dqn loss."""
@@ -353,54 +334,58 @@ class DQN_Meta_Learner:
         self.dqn_target.load_state_dict(self.dqn.state_dict())
 
 
-    def train(self, max_steps: int, buffer_size: int,batch_size: int, time_horizon: int, learning_rate: float, gamma: float, hidden_size: int,
-              hidden_layers: int, v_max: int, v_min: int, atom_size: int, update_period: int, beta: float, alpha: float,
+    def train(self, max_steps: int,epochs: int, buffer_size: int,batch_size: int, time_horizon: int, update_period: int,
               prior_eps: float, epsilon: float):
-
-        self.init_network_and_optim(hidden_size=hidden_size, network_num_hidden_layers=hidden_layers, learning_rate=learning_rate,
-                                    beta=beta, prior_eps=prior_eps, alpha=alpha, gamma=gamma,
-                                    v_max=v_max, v_min=v_min, atom_size=atom_size, max_scheduler_steps=100000)
-        self.meta_step = 0
 
         steps = 0
         update_counter = 1
         while steps < max_steps:
-            memory, memory_n, buffer_length = self.generate_and_fill_buffer(buffer_size=buffer_size,epsilon=epsilon, time_horizon=time_horizon)
-            steps += buffer_length
-            print("Generated buffer of size: {}".format(buffer_length))
+            memory, memory_n = self.generate_and_fill_buffer(buffer_size=buffer_size,epsilon=epsilon, time_horizon=time_horizon)
+            steps += len(memory)
 
             ###### Update the model for every step taken ##########
-            for epoch in range(10):
+            losses = []
+            for epoch in range(len(memory) // epochs):
                 loss, elementwise_loss, indices = self.calc_loss(memory, memory_n, batch_size=batch_size, n_step=time_horizon)
 
-                print("Current Loss {} at step {}".format(loss.item(), steps))
-                if steps > update_period * update_counter:
+                if update_counter % update_period == 0:
                     self._target_hard_update()
                     update_counter += 1
 
-                loss.backward()
                 self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.dqn.parameters(), 10.0)
                 self.optimizer.step()
-                self.learning_rate_scheduler.step()
-                ### Increase beta for PER
-                self.beta = self.beta + steps / max_steps * (1.0 - self.beta)
+                losses.append(loss.detach().cpu().numpy())
 
                 loss_for_prior = elementwise_loss.detach().cpu().numpy()
                 new_priorities = loss_for_prior + prior_eps
                 memory.update_priorities(indices, new_priorities)
-        self.meta_step += 1
+
+                ### Increase beta for PER
+            self.beta = self.beta + steps / max_steps * (1.0 - self.beta)
+            epsilon = max((1 - steps * 2/max_steps) * epsilon , 0)
+            self.learning_rate_scheduler.step(epoch=steps)
+
+            print("Current Loss: {:.3f} at step {} with learning rate of: {:.6f}".format(np.mean(losses), steps, self.optimizer.param_groups[0]['lr']))
+            print("Current beta: {:.3f}\nCurrent eps: {:.3f}".format(self.beta, epsilon))
 
 
 if __name__ == '__main__':
 
-    writer = SummaryWriter("results/dqn_1")
+    writer = SummaryWriter("results/dqn_0")
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if device == 'cuda':
+        print(torch.cuda.get_device_name(0))
+        print('Memory Usage:')
+        print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
+        print('Cached:   ', round(torch.cuda.memory_cached(0)/1024**3,1), 'GB')
 
     dqn_module = DQN_Meta_Learner(device=device, writer=writer)
 
     engine_configuration_channel = EngineConfigurationChannel()
-    engine_configuration_channel.set_configuration_parameters(time_scale=5.0)
+    engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
 
     env_parameters_channel = EnvironmentParametersChannel()
     env_parameters_channel.set_float_parameter("seed", 5.0)
@@ -409,30 +394,45 @@ if __name__ == '__main__':
                            no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
 
     ############ Hyperparameters DQN ##############
+    hyperparameters = {}
 
-    max_steps = 1000000
-    buffer_size = 2000 # Replay buffer size
-    learning_rate = 0.0001 # Typical range: 0.00001 - 0.001
-    batch_size = 512 # Typical range: 32-512
-    network_num_hidden_layers = 2
-    network_layer_size = 256
-    time_horizon = 512
-    gamma= 0.99
+    hyperparameters['Algorithm'] = "RAINBOW"
+
+    hyperparameters['max_steps'] = 1000000
+    hyperparameters['buffer_size'] = 5000 # Replay buffer size
+    hyperparameters['learning_rate'] = 0.0001 # Typical range: 0.00001 - 0.001
+    hyperparameters['batch_size'] = 512 # Typical range: 32-512
+    hyperparameters['hidden_layers'] = 2
+    hyperparameters['layer_size'] = 256
+    hyperparameters['time_horizon'] = 64
+    hyperparameters['gamma'] = 0.99
 
     ### DQN specific
 
-    epsilon = 0.15
-    v_max = 13
-    v_min = -13
-    atom_size = 51
-    update_period = 5000
-    beta = 0.5
-    alpha = 0.7
-    prior_eps = 1e-6
+    hyperparameters['epochs'] = 10             # Epochs of Optimizer steps of a finished buffer len(Finished Buffer) / Epochs -> greater means less updates
+    hyperparameters['epsilon'] = 0.15          # Exploration vs Exploitation Percentage to explore. epsilon = 0 -> No exploring
+    hyperparameters['v_max'] = 13              # Maximum Value of Reward
+    hyperparameters['v_min'] = -13             # Minimum Value of Reward
+    hyperparameters['atom_size'] = 51          # Atom Size for categorical DQN
+    hyperparameters['update_period'] = 50      # Period after which Target Network gets updated
+    hyperparameters['beta'] = 0.6              # How much to use importance sampling
+    hyperparameters['alpha'] = 0.2             # How much to use prioritization
+    hyperparameters['prior_eps'] = 1e-6        # Guarantee to use all experiences
 
+
+    writer.add_text("Hyperparameters", str(hyperparameters))
+    print("Started run with following hyperparameters:")
+    for key in hyperparameters:
+        print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
 
     dqn_module.set_env_and_detect_spaces(env, task=0)
-    dqn_module.train(max_steps=max_steps, buffer_size=buffer_size, batch_size=batch_size, time_horizon=time_horizon,
-                     learning_rate=learning_rate, gamma=gamma, hidden_size=network_layer_size, hidden_layers=network_layer_size,
-                     v_max=v_max, v_min=v_min, atom_size=atom_size, update_period=update_period, beta=beta, alpha=alpha,
-                     prior_eps=prior_eps, epsilon=epsilon)
+
+    dqn_module.init_networks_and_optimizers(hidden_size=hyperparameters['layer_size'], network_num_hidden_layers=hyperparameters['hidden_layers'],
+                                learning_rate=hyperparameters['learning_rate'], beta=hyperparameters['beta'], prior_eps=hyperparameters['prior_eps'], alpha=hyperparameters['alpha'],
+                                            gamma=hyperparameters['gamma'], v_max=hyperparameters['v_max'], v_min=hyperparameters['v_min'], atom_size=hyperparameters['atom_size'],
+                                            max_scheduler_steps=hyperparameters['max_steps'])
+
+
+    dqn_module.train(max_steps=hyperparameters['max_steps'], epochs=hyperparameters['epochs'],buffer_size=hyperparameters['buffer_size'],
+                     batch_size=hyperparameters['batch_size'], time_horizon=hyperparameters['time_horizon'],
+                     prior_eps=hyperparameters['prior_eps'], epsilon=hyperparameters['epsilon'], update_period=hyperparameters['update_period'])
