@@ -65,6 +65,7 @@ class SAC_Meta_Learner:
         print("Using: " + str(self.device))
         self.writer = writer
         self.meta_step = 0
+        self.step = 0
         self.policy: ActorCriticPolicy
         self.obs_space: Tuple
         self.action_space: Tuple
@@ -80,6 +81,8 @@ class SAC_Meta_Learner:
         hyperparameters['layer_size'] = 256
         hyperparameters['time_horizon'] = 64
         hyperparameters['gamma'] = 0.99
+        hyperparameters['decay_lr'] = True
+
 
         hyperparameters['buffer_size'] = 5000  # Replay buffer size
 
@@ -108,15 +111,17 @@ class SAC_Meta_Learner:
         self.action_space = branches
         self.env.reset()
 
-    def get_networks(self):
-        networks = []
-        networks.append(self.networks.value_network)
-        networks.append(self.networks.policy_network)
-        networks.append(self.networks.target_network)
+    def get_networks_and_parameters(self) -> dict:
+        networks_and_parameters = {}
+        networks_and_parameters['networks'] = []
+        networks_and_parameters['networks'].append(self.networks.value_network)
+        networks_and_parameters['networks'].append(self.networks.policy_network)
+        networks_and_parameters['networks'].append(self.networks.target_network)
+        networks_and_parameters['parameters'] = []
         if self.networks.use_adaptive_entropy_coeff:
-            networks.append(self.networks.log_entropy_coeff)
+            networks_and_parameters['parameters'].append(self.networks.log_entropy_coeff)
 
-        return networks
+        return networks_and_parameters
 
     def init_networks_and_optimizers(self, hyperparameters: dict):
 
@@ -443,12 +448,11 @@ class SAC_Meta_Learner:
             print("Mean Cumulative Reward: {} at step {}".format(np.mean(cumulative_rewards), self.step))
             print("Mean Episode Length: {} at step {}".format(np.mean(trajectory_lengths), self.step))
 
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(cumulative_rewards),
-                                   self.meta_step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(episode_lengths),
-                                   self.meta_step)
-
-        return buffer, appended_steps
+            self.writer.add_scalars('task_' + str(self.task) + r"\SAC Cumulative Reward",
+                                    {r'\meta_step_' + str(self.meta_step): np.mean(cumulative_rewards)}, self.step)
+            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Mean Episode Length',
+                                    {r'\meta_step_' + str(self.meta_step): np.mean(episode_lengths)}, self.step)
+        return buffer, appended_steps, np.mean(cumulative_rewards), np.mean(trajectory_lengths)
 
     def close_env(self):
         self.env.close()
@@ -465,9 +469,14 @@ class SAC_Meta_Learner:
 
         replay_buffer = SACBuffer(max_buffer_size=buffer_size, action_space=sac_module.action_space)
 
-        self.step = 0
+        mean_rewards = []
+        mean_episode_lengths = []
+
         while self.step < max_steps:
-            buffer, steps_taken = self.generate_trajectories_and_fill_buffer(buffer=replay_buffer, time_horizon=time_horizon)
+            buffer, steps_taken, mean_reward, mean_episode_length = self.generate_trajectories_and_fill_buffer(buffer=replay_buffer, time_horizon=time_horizon)
+            mean_rewards.append(mean_reward)
+            mean_episode_lengths.append(mean_episode_length)
+
             print("Steps taken since last update: {}".format(steps_taken))
             self.step += steps_taken
             update_steps = 0
@@ -501,24 +510,31 @@ class SAC_Meta_Learner:
                 self.value_optimizer.step()
                 self.entropy_optimizer.step()
 
-                self.learning_rate_scheduler_e.step(epoch=self.step)
-                self.learning_rate_scheduler_p.step(epoch=self.step)
-                self.learning_rate_scheduler_v.step(epoch=self.step)
+                if (hyperparameters['decay_lr']):
+                    self.learning_rate_scheduler_e.step(epoch=self.step)
+                    self.learning_rate_scheduler_p.step(epoch=self.step)
+                    self.learning_rate_scheduler_v.step(epoch=self.step)
 
                 self.networks.soft_update(self.networks.policy_network.critic,
                                                 self.networks.target_network, tau=tau)
 
                 update_steps += 1
-            writer.add_scalar('Task: ' + str(self.task) + '/Value Loss', np.mean(value_losses), self.step)
-            writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss', np.mean(policy_losses), self.step)
-            writer.add_scalar('Task: ' + str(self.task) + '/Entropy Loss', np.mean(entropy_losses), self.step)
-            writer.add_scalar('Task: ' + str(self.task) + '/Q1 Loss', np.mean(q1_losses), self.step)
-            writer.add_scalar('Task: ' + str(self.task) + '/Q2 Loss', np.mean(q2_losses), self.step)
+
+            self.writer.add_scalars('task_' + str(self.task) + r"\SAC Entropy Loss",
+                                    {r'\meta_step_'+str(self.meta_step): np.mean(entropy_losses)}, self.step)
+            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Policy Loss',
+                                   {r'\meta_step_' + str(self.meta_step) : np.mean(policy_losses)}, self.step)
+            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Value Loss',
+                                   {r'\meta_step_' + str(self.meta_step) : np.mean(value_losses)}, self.step)
+            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Q1 Loss',
+                                    {r'\meta_step_' + str(self.meta_step): np.mean(q1_losses)}, self.step)
+            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Q2 Loss',
+                                    {r'\meta_step_' + str(self.meta_step): np.mean(q2_losses)}, self.step)
 
             frame_end = time.time()
             print("Current Update rate = {} updates per second".format(steps_taken / (frame_end - frame_start)))
 
-
+        return np.mean(mean_rewards), np.mean(mean_episode_lengths)
 
 if __name__ == '__main__':
 
@@ -554,6 +570,8 @@ if __name__ == '__main__':
     training_parameters['layer_size'] = 256
     training_parameters['time_horizon'] = 64
     training_parameters['gamma'] = 0.99
+    training_parameters['decay_lr'] = True
+
 
     training_parameters['init_coeff'] = 0.5 # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
     training_parameters['tau'] = 0.005 # Typical range: 0.005 - 0.01 decrease for stability

@@ -33,6 +33,10 @@ class Rainbow_Meta_Learner:
         self.device = device
         self.writer = writer
 
+        self.step = 0
+        self.meta_step = 0
+
+
     def get_default_hyperparameters(self):
         hyperparameters = {}
         hyperparameters['Algorithm'] = "RAINBOW"
@@ -44,6 +48,8 @@ class Rainbow_Meta_Learner:
         hyperparameters['layer_size'] = 256
         hyperparameters['time_horizon'] = 64
         hyperparameters['gamma'] = 0.99
+        hyperparameters['decay_lr'] = True
+
 
         hyperparameters['buffer_size'] = 5000  # Replay buffer size
         hyperparameters['epochs'] = 10  # Buffer_length/epochs = num_updates
@@ -120,8 +126,11 @@ class Rainbow_Meta_Learner:
 
         self.env.reset()
 
-    def get_networks(self):
-        return [self.dqn, self.dqn_target]
+    def get_networks_and_parameters(self):
+        networks_and_parameters = {}
+        networks_and_parameters['networks'] = [self.dqn, self.dqn_target]
+        networks_and_parameters['parameters'] = []
+        return networks_and_parameters
 
     def select_action(self, state: np.ndarray, epsilon, device) -> np.ndarray:
         """Select an action from the input state."""
@@ -288,10 +297,6 @@ class Rainbow_Meta_Learner:
                     agent_ptr[agent_id] = 0
             first_iteration = False
 
-        # self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(cumulative_rewards), self.meta_step)
-        # self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(trajectory_lengths),
-        #                        self.meta_step)
-
         use_n_step = True if time_horizon > 1 else False
 
         acion_dim = 1
@@ -311,15 +316,16 @@ class Rainbow_Meta_Learner:
             if one_step_transition:
                 per_dqn_buffer.store(*one_step_transition)
 
-        self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(cumulative_rewards), self.step)
-        self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(trajectory_lengths),
-                               self.step)
+        self.writer.add_scalars('task_' + str(self.task) + r"\Rainbow Cumulative Reward",
+                                {r'\meta_step_' + str(self.meta_step): np.mean(cumulative_rewards)}, self.step)
+        self.writer.add_scalars('task_' + str(self.task) + r'\Rainbow Mean Episode Length',
+                                {r'\meta_step_' + str(self.meta_step): np.mean(trajectory_lengths)}, self.step)
 
         print("Mean Cumulative Reward: {} at step {}".format(np.mean(cumulative_rewards), self.step))
         print("Mean Episode Lengths: {} at step {}".format(np.mean(trajectory_lengths), self.step))
 
         print("Finished generating Buffer with size of: {} in {:.3f}s! Storing took {:.3f}s".format(len(per_dqn_buffer), time.time() - start_time, time.time() - buffer_time))
-        return per_dqn_buffer, n_dqn_buffer
+        return per_dqn_buffer, n_dqn_buffer, np.mean(cumulative_rewards), np.mean(trajectory_lengths)
 
     def _compute_dqn_loss(self, samples: Dict[str, np.ndarray], gamma: float) -> torch.Tensor:
         """Return categorical dqn loss."""
@@ -388,11 +394,15 @@ class Rainbow_Meta_Learner:
         prior_eps = hyperparameters['prior_eps']
         epsilon = hyperparameters['epsilon']
 
-
-        self.step = 0
         update_counter = 1
+
+        mean_rewards = []
+        mean_episode_lengths = []
+
         while self.step < max_steps:
-            memory, memory_n = self.generate_and_fill_buffer(buffer_size=buffer_size,epsilon=epsilon, time_horizon=time_horizon)
+            memory, memory_n, mean_reward, mean_episode_length = self.generate_and_fill_buffer(buffer_size=buffer_size,epsilon=epsilon, time_horizon=time_horizon)
+            mean_rewards.append(mean_reward)
+            mean_episode_lengths.append(mean_episode_length)
             self.step += len(memory)
 
             ###### Update the model for every step taken ##########
@@ -417,10 +427,16 @@ class Rainbow_Meta_Learner:
                 ### Increase beta for PER
             self.beta = self.beta + self.step / max_steps * (1.0 - self.beta)
             epsilon = max((1 - self.step * 2/max_steps) * epsilon , 0)
-            self.learning_rate_scheduler.step(epoch=self.step)
+            if(hyperparameters['decay_lr']):
+                self.learning_rate_scheduler.step(epoch=self.step)
+
+            self.writer.add_scalars('task_' + str(self.task) + r"\Rainbow Value Loss",
+                                    {r'\meta_step_' + str(self.meta_step): np.mean(losses)}, self.step)
 
             print("Current Loss: {:.3f} at step {} with learning rate of: {:.6f}".format(np.mean(losses), self.step, self.optimizer.param_groups[0]['lr']))
             print("Current beta: {:.3f}\nCurrent eps: {:.3f}".format(self.beta, epsilon))
+
+        return np.mean(mean_rewards), np.mean(mean_episode_lengths)
 
 
 if __name__ == '__main__':
@@ -454,6 +470,8 @@ if __name__ == '__main__':
     training_parameters['layer_size'] = 256
     training_parameters['time_horizon'] = 64
     training_parameters['gamma'] = 0.99
+    training_parameters['decay_lr'] = True
+
 
     ### DQN specific
 

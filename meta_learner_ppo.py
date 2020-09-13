@@ -23,13 +23,14 @@ flatten = lambda l: [item for sublist in l for item in sublist]
 class PPO_Meta_Learner:
     def __init__(
             self,
-            device: torch.device,
-            writer: SummaryWriter = None,
+            device: str,
+            writer: SummaryWriter,
     ):
         self.device = device
         print("Using: " + str(self.device))
         self.writer = writer
         self.meta_step = 0
+        self.step = 0
         self.policy: ActorCriticPolicy
 
     def get_default_hyperparameters(self):
@@ -43,11 +44,14 @@ class PPO_Meta_Learner:
         hyperparameters['layer_size'] = 256
         hyperparameters['time_horizon'] = 64
         hyperparameters['gamma'] = 0.99
+        hyperparameters['decay_lr'] = True
+
         hyperparameters['buffer_size'] = 20000  # Replay buffer size
         hyperparameters['beta'] = 0.005  # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
         hyperparameters['epsilon'] = 0.2  # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability
         hyperparameters['lambd'] = 0.95  # Typical range: 0.9 - 0.95 GAE Parameter
         hyperparameters['num_epochs'] = 3  # Typical range: 3 - 10
+
 
         return hyperparameters
     def set_env_and_detect_spaces(self, env, task):
@@ -83,9 +87,11 @@ class PPO_Meta_Learner:
 
         self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
 
-    def get_networks(self):
-        return self.policy
-
+    def get_networks_and_parameters(self):
+        networks_and_parameters = {}
+        networks_and_parameters['networks'] = [self.policy]
+        networks_and_parameters['parameters'] = []
+        return networks_and_parameters
 
     def discount_rewards(self, r, gamma=0.99, value_next=0.0):
         """
@@ -119,8 +125,8 @@ class PPO_Meta_Learner:
 
     def evaluate_actions(self, obs: np.ndarray, acts: np.ndarray) -> (
             torch.FloatTensor, torch.FloatTensor, torch.FloatTensor):
-        obs = torch_from_np(obs)
-        acts = torch_from_np(acts)
+        obs = torch_from_np(obs, self.device)
+        acts = torch_from_np(acts, self.device)
         dists, values = self.policy.policy(obs)
         cumulated_log_probs, entropies, all_log_probs = get_probs_and_entropies(acts, dists, self.device)  # Error here
         return cumulated_log_probs, entropies, values
@@ -155,10 +161,10 @@ class PPO_Meta_Learner:
 
         returns = np.add(normalized_advantages, values)
 
-        old_values = torch_from_np(values)
-        old_log_probs = torch_from_np(old_log_probs)
-        returns = torch_from_np(returns)
-        normalized_advantages = torch_from_np(normalized_advantages)
+        old_values = torch_from_np(values, self.device)
+        old_log_probs = torch_from_np(old_log_probs, self.device)
+        returns = torch_from_np(returns, self.device)
+        normalized_advantages = torch_from_np(normalized_advantages, self.device)
 
         log_probs, entropies, values = self.evaluate_actions(obs, acts)
         value_loss = self.calc_value_loss(values, old_values, returns, eps=epsilon)
@@ -169,11 +175,6 @@ class PPO_Meta_Learner:
         policy_loss = policy_loss
         value_loss = 0.5 * value_loss
         entropy_loss = - beta * entropy
-
-        # self.writer.add_scalar('Task: ' + str(self.task) + '/Entropy ', entropy.item(), self.meta_step)
-        # self.writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss ', policy_loss.item(), self.meta_step)
-        # self.writer.add_scalar('Task: ' + str(self.task) + '/Value Loss ', value_loss.item(), self.meta_step)
-        # self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', kullback_leibler.item(), self.meta_step)
 
         # print("Entropy: {:.3f}\nLosses:  Policy: {:.3f}, Value: {:.3f}, Approx KL: {:.3f}".format(entropy.item(), policy_loss.item(), value_loss.item(), kullback_leibler.item()))
 
@@ -374,11 +375,14 @@ class PPO_Meta_Learner:
         print("Mean Cumulative Reward: {} at step {}".format(np.mean(cumulative_rewards), self.step))
         print("Mean Episode Length: {} at step {}".format(np.mean(trajectory_lengths), self.step))
 
-        self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(cumulative_rewards), self.meta_step)
-        self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(episode_lengths),
-                               self.meta_step)
+        self.writer.add_scalars('task_' + str(self.task) + r"\PPO Cumulative Reward",
+                                {r'\meta_step_' + str(self.meta_step): np.mean(cumulative_rewards)}, self.step)
+        self.writer.add_scalars('task_' + str(self.task) + r'\PPO Mean Episode Length',
+                                {r'\meta_step_' + str(self.meta_step): np.mean(episode_lengths)}, self.step)
 
         print("Generated buffer of lenth: {} in {:.3f} secs.".format(buffer_length, time.time() - start_time))
+
+        return np.mean(cumulative_rewards), np.mean(episode_lengths)
 
     def close_env(self):
         self.env.close()
@@ -397,10 +401,19 @@ class PPO_Meta_Learner:
         epsilon = hyperparameters['epsilon']
 
         self.step = 0
+        mean_rewards = []
+        mean_episode_lengths = []
         while self.step < max_steps:
-            print("Current step: " + str(self.step))
+            print("Current PPO Training step: " + str(self.step))
+            for parameter_group in self.optimizer.param_groups:
+                print("Current PPO Training learning rate: {:.6f}".format(parameter_group['lr']))
+
             buffer = PPOBuffer(buffer_size=buffer_size)
-            self.generate_and_fill_buffer(buffer=buffer, time_horizon=time_horizon)
+            mean_reward, mean_episode_length = self.generate_and_fill_buffer(buffer=buffer, time_horizon=time_horizon)
+
+            mean_rewards.append(mean_reward)
+            mean_episode_lengths.append(mean_episode_length)
+
             buffer_length = len(buffer)
             self.step += buffer_length
             epochs = 3
@@ -417,16 +430,21 @@ class PPO_Meta_Learner:
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 10.0)
                     self.optimizer.step()
-            for parameter_group in ppo_module.optimizer.param_groups:
-                print("Current learning rate: {:.6f}".format(parameter_group['lr']))
 
-            self.meta_step += 1
-            self.learning_rate_scheduler.step(epoch=self.step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Entropy ', np.mean(entropies), self.step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss ', np.mean(p_losses), self.step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Value Loss ', np.mean(v_losses), self.step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', np.mean(kls), self.step)
+            if(hyperparameters['decay_lr']):
+                self.learning_rate_scheduler.step(epoch=self.step)
 
+            self.writer.add_scalars('task_' + str(self.task) + r"\PPO Entropy Loss",
+                                    {r'\meta_step_'+str(self.meta_step): np.mean(entropies)}, self.step)
+            self.writer.add_scalars('task_' + str(self.task) + r'\PPO Policy Loss',
+                                   {r'\meta_step_' + str(self.meta_step) : np.mean(p_losses)}, self.step)
+            self.writer.add_scalars('task_' + str(self.task) + r'\PPO Value Loss',
+                                   {r'\meta_step_' + str(self.meta_step) : np.mean(v_losses)}, self.step)
+            self.writer.add_scalars(
+                'task_' + str(self.task) + r'\PPO Approx Kullback-Leibler',
+                {r'\meta_step_' + str(self.meta_step): np.mean(kls)}, self.step)
+
+        return np.mean(mean_rewards), np.mean(mean_episode_lengths)
 
 if __name__ == '__main__':
 
@@ -453,13 +471,15 @@ if __name__ == '__main__':
 
 
     training_parameters['max_steps'] = 50000
-    training_parameters['buffer_size'] = 2000  # Replay buffer size
+    training_parameters['buffer_size'] = 20000  # Replay buffer size
     training_parameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
     training_parameters['batch_size'] = 512  # Typical range: 32-512
     training_parameters['hidden_layers'] = 2
     training_parameters['layer_size'] = 256
     training_parameters['time_horizon'] = 64
     training_parameters['gamma'] = 0.99
+    training_parameters['decay_lr'] = True
+
 
     training_parameters['beta'] = 0.005 # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
     training_parameters['epsilon'] = 0.2 # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability

@@ -24,14 +24,8 @@ def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space) 
     return condensed_q
 
 def get_probs_and_entropies(acts: torch.FloatTensor, dists: List[torch.distributions.Categorical], device):
-
-    if device == 'cuda':
-        test_tensor = torch.FloatTensor([0]).to(device)
-        cumulated_log_probs = torch.zeros([acts.shape[0]]).to('cuda')
-        entropies = torch.zeros([acts.shape[0]]).to('cuda')
-    else:
-        cumulated_log_probs = torch.zeros([acts.shape[0]])
-        entropies = torch.zeros([acts.shape[0]])
+    cumulated_log_probs = torch.zeros([acts.shape[0]]).to(device)
+    entropies = torch.zeros([acts.shape[0]]).to(device)
     for i, dist in enumerate(dists):
         cumulated_log_probs = torch.add(cumulated_log_probs, dist.log_prob(acts[:, i]))
         entropies = torch.add(entropies, dist.entropy())
