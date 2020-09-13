@@ -6,15 +6,12 @@ import torch.optim as optim
 
 from typing import Dict, List
 
-from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
-from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
-
 from mlagents_envs.environment import UnityEnvironment
 
 from torch.utils.tensorboard import SummaryWriter
 
 from buffers import DQNBuffer, PrioritizedDQNBuffer
-from utils import ActionFlattener, torch_from_np
+from utils import ActionFlattener, torch_from_np, init_unity_env
 from env_utils import step_env
 from models import DeepQNetwork
 
@@ -23,7 +20,7 @@ def flatten(input):
     return [item for sublist in input for item in sublist]
 
 
-class DQN_Meta_Learner:
+class Rainbow_Meta_Learner:
     """DQN Agent interacting with environment.
     """
 
@@ -36,9 +33,44 @@ class DQN_Meta_Learner:
         self.device = device
         self.writer = writer
 
-    def init_networks_and_optimizers(self, hidden_size: int, beta: float, prior_eps: float, network_num_hidden_layers: int,
-                               max_scheduler_steps: int,v_max: int, v_min: int, atom_size: int, learning_rate: float,
-                               gamma: float, alpha: float):
+    def get_default_hyperparameters(self):
+        hyperparameters = {}
+        hyperparameters['Algorithm'] = "RAINBOW"
+
+        hyperparameters['max_steps'] = 1000000
+        hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
+        hyperparameters['batch_size'] = 512  # Typical range: 32-512
+        hyperparameters['hidden_layers'] = 2
+        hyperparameters['layer_size'] = 256
+        hyperparameters['time_horizon'] = 64
+        hyperparameters['gamma'] = 0.99
+
+        hyperparameters['buffer_size'] = 5000  # Replay buffer size
+        hyperparameters['epochs'] = 10  # Buffer_length/epochs = num_updates
+        hyperparameters['epsilon'] = 0.15  # Percentage to explore epsilon = 0 -> Decaying after half training
+        hyperparameters['v_max'] = 13  # Maximum Value of Reward
+        hyperparameters['v_min'] = -13  # Minimum Value of Reward
+        hyperparameters['atom_size'] = 51  # Atom Size for categorical DQN
+        hyperparameters['update_period'] = 50  # Period after which Target Network gets updated
+        hyperparameters['beta'] = 0.6  # How much to use importance sampling
+        hyperparameters['alpha'] = 0.2  # How much to use prioritization
+        hyperparameters['prior_eps'] = 1e-6  # Guarantee to use all experiences
+
+        return hyperparameters
+
+    def init_networks_and_optimizers(self, hyperparameters: dict):
+        hidden_size = hyperparameters['layer_size']
+        network_num_hidden_layers = hyperparameters['hidden_layers']
+        max_scheduler_steps = hyperparameters['max_steps']
+        atom_size = hyperparameters['atom_size']
+        v_max = hyperparameters['v_max']
+        v_min = hyperparameters['v_min']
+        prior_eps = hyperparameters['prior_eps']
+        alpha = hyperparameters['alpha']
+        beta = hyperparameters['beta']
+        gamma = hyperparameters['gamma']
+        learning_rate = hyperparameters['learning_rate']
+
         # Categorical DQN parameters
         self.v_min = v_min
         self.v_max = v_max
@@ -88,8 +120,8 @@ class DQN_Meta_Learner:
 
         self.env.reset()
 
-    def get_state_dict(self):
-        return [self.dqn.state_dict(), self.dqn_target.state_dict()]
+    def get_networks(self):
+        return [self.dqn, self.dqn_target]
 
     def select_action(self, state: np.ndarray, epsilon, device) -> np.ndarray:
         """Select an action from the input state."""
@@ -152,7 +184,7 @@ class DQN_Meta_Learner:
         buffer_length = 0
         first_iteration = True
 
-        rewards = []
+        cumulative_rewards = []
         trajectory_lengths = []
 
         buffer_filled = False
@@ -228,7 +260,7 @@ class DQN_Meta_Learner:
                 else:  # If the corresponding agent is done, store the trajectory into obs_buf, rews_buf...
                     next_action = int(self.select_action(next_obs, epsilon,self.device))
                     actions[agent_id] = next_action
-                    rewards.append(sum(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1]))
+                    cumulative_rewards.append(sum(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1]))
                     trajectory_lengths.append(agent_ptr[agent_id])
                     for i in range(agent_ptr[agent_id] + 1):  # For every experiences store it in buffer
                         if (agent_ptr[agent_id] + buffer_length >= buffer_size):
@@ -256,7 +288,7 @@ class DQN_Meta_Learner:
                     agent_ptr[agent_id] = 0
             first_iteration = False
 
-        # self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
+        # self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(cumulative_rewards), self.meta_step)
         # self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(trajectory_lengths),
         #                        self.meta_step)
 
@@ -278,6 +310,14 @@ class DQN_Meta_Learner:
                 one_step_transition = transition
             if one_step_transition:
                 per_dqn_buffer.store(*one_step_transition)
+
+        self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(cumulative_rewards), self.step)
+        self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(trajectory_lengths),
+                               self.step)
+
+        print("Mean Cumulative Reward: {} at step {}".format(np.mean(cumulative_rewards), self.step))
+        print("Mean Episode Lengths: {} at step {}".format(np.mean(trajectory_lengths), self.step))
+
         print("Finished generating Buffer with size of: {} in {:.3f}s! Storing took {:.3f}s".format(len(per_dqn_buffer), time.time() - start_time, time.time() - buffer_time))
         return per_dqn_buffer, n_dqn_buffer
 
@@ -333,15 +373,27 @@ class DQN_Meta_Learner:
         """Hard update: target <- local."""
         self.dqn_target.load_state_dict(self.dqn.state_dict())
 
+    def close_env(self):
+        self.env.close()
 
-    def train(self, max_steps: int,epochs: int, buffer_size: int,batch_size: int, time_horizon: int, update_period: int,
-              prior_eps: float, epsilon: float):
+    def train(self, hyperparameters: dict):
+        max_steps = hyperparameters['max_steps']
+        batch_size = hyperparameters['batch_size']
+        time_horizon = hyperparameters['time_horizon']
+        buffer_size = hyperparameters['buffer_size']
 
-        steps = 0
+        epochs = hyperparameters['epochs']
+
+        update_period = hyperparameters['update_period']
+        prior_eps = hyperparameters['prior_eps']
+        epsilon = hyperparameters['epsilon']
+
+
+        self.step = 0
         update_counter = 1
-        while steps < max_steps:
+        while self.step < max_steps:
             memory, memory_n = self.generate_and_fill_buffer(buffer_size=buffer_size,epsilon=epsilon, time_horizon=time_horizon)
-            steps += len(memory)
+            self.step += len(memory)
 
             ###### Update the model for every step taken ##########
             losses = []
@@ -363,17 +415,19 @@ class DQN_Meta_Learner:
                 memory.update_priorities(indices, new_priorities)
 
                 ### Increase beta for PER
-            self.beta = self.beta + steps / max_steps * (1.0 - self.beta)
-            epsilon = max((1 - steps * 2/max_steps) * epsilon , 0)
-            self.learning_rate_scheduler.step(epoch=steps)
+            self.beta = self.beta + self.step / max_steps * (1.0 - self.beta)
+            epsilon = max((1 - self.step * 2/max_steps) * epsilon , 0)
+            self.learning_rate_scheduler.step(epoch=self.step)
 
-            print("Current Loss: {:.3f} at step {} with learning rate of: {:.6f}".format(np.mean(losses), steps, self.optimizer.param_groups[0]['lr']))
+            print("Current Loss: {:.3f} at step {} with learning rate of: {:.6f}".format(np.mean(losses), self.step, self.optimizer.param_groups[0]['lr']))
             print("Current beta: {:.3f}\nCurrent eps: {:.3f}".format(self.beta, epsilon))
 
 
 if __name__ == '__main__':
 
-    writer = SummaryWriter("results/dqn_0")
+    run_id = "results/dqn_1"
+
+    writer = SummaryWriter(run_id)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if device == 'cuda':
@@ -382,57 +436,44 @@ if __name__ == '__main__':
         print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
         print('Cached:   ', round(torch.cuda.memory_cached(0)/1024**3,1), 'GB')
 
-    dqn_module = DQN_Meta_Learner(device=device, writer=writer)
+    dqn_module = Rainbow_Meta_Learner(device=device, writer=writer)
 
-    engine_configuration_channel = EngineConfigurationChannel()
-    engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
-
-    env_parameters_channel = EnvironmentParametersChannel()
-    env_parameters_channel.set_float_parameter("seed", 5.0)
-    env = UnityEnvironment(file_name="Training/Maze.app",
-                           base_port=5000, timeout_wait=120,
-                           no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
+    env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=2, target_z=2)
 
     ############ Hyperparameters DQN ##############
-    hyperparameters = {}
+    training_parameters = {}
 
-    hyperparameters['Algorithm'] = "RAINBOW"
+    training_parameters['Algorithm'] = "RAINBOW"
+    training_parameters['run_id'] = run_id
 
-    hyperparameters['max_steps'] = 1000000
-    hyperparameters['buffer_size'] = 5000 # Replay buffer size
-    hyperparameters['learning_rate'] = 0.0001 # Typical range: 0.00001 - 0.001
-    hyperparameters['batch_size'] = 512 # Typical range: 32-512
-    hyperparameters['hidden_layers'] = 2
-    hyperparameters['layer_size'] = 256
-    hyperparameters['time_horizon'] = 64
-    hyperparameters['gamma'] = 0.99
+    training_parameters['max_steps'] = 1000000
+    training_parameters['buffer_size'] = 5000 # Replay buffer size
+    training_parameters['learning_rate'] = 0.0001 # Typical range: 0.00001 - 0.001
+    training_parameters['batch_size'] = 512 # Typical range: 32-512
+    training_parameters['hidden_layers'] = 2
+    training_parameters['layer_size'] = 256
+    training_parameters['time_horizon'] = 64
+    training_parameters['gamma'] = 0.99
 
     ### DQN specific
 
-    hyperparameters['epochs'] = 10             # Epochs of Optimizer steps of a finished buffer len(Finished Buffer) / Epochs -> greater means less updates
-    hyperparameters['epsilon'] = 0.15          # Exploration vs Exploitation Percentage to explore. epsilon = 0 -> No exploring
-    hyperparameters['v_max'] = 13              # Maximum Value of Reward
-    hyperparameters['v_min'] = -13             # Minimum Value of Reward
-    hyperparameters['atom_size'] = 51          # Atom Size for categorical DQN
-    hyperparameters['update_period'] = 50      # Period after which Target Network gets updated
-    hyperparameters['beta'] = 0.6              # How much to use importance sampling
-    hyperparameters['alpha'] = 0.2             # How much to use prioritization
-    hyperparameters['prior_eps'] = 1e-6        # Guarantee to use all experiences
+    training_parameters['epochs'] = 10             # Epochs of Optimizer steps of a finished buffer len(Finished Buffer) / Epochs -> greater means less updates
+    training_parameters['epsilon'] = 0.15          # Exploration vs Exploitation Percentage to explore. epsilon = 0 -> No exploring is decaying to zero after half of training steps
+    training_parameters['v_max'] = 13              # Maximum Value of Reward
+    training_parameters['v_min'] = -13             # Minimum Value of Reward
+    training_parameters['atom_size'] = 51          # Atom Size for categorical DQN
+    training_parameters['update_period'] = 50      # Period after which Target Network gets updated
+    training_parameters['beta'] = 0.6              # How much to use importance sampling
+    training_parameters['alpha'] = 0.2             # How much to use prioritization
+    training_parameters['prior_eps'] = 1e-6        # Guarantee to use all experiences
 
 
-    writer.add_text("Hyperparameters", str(hyperparameters))
-    print("Started run with following hyperparameters:")
-    for key in hyperparameters:
-        print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
+    writer.add_text("training_parameters", str(training_parameters))
+    print("Started run with following training_parameters:")
+    for key in training_parameters:
+        print("{:<25s} {:<20s}".format(key, str(training_parameters[key])))
 
     dqn_module.set_env_and_detect_spaces(env, task=0)
 
-    dqn_module.init_networks_and_optimizers(hidden_size=hyperparameters['layer_size'], network_num_hidden_layers=hyperparameters['hidden_layers'],
-                                learning_rate=hyperparameters['learning_rate'], beta=hyperparameters['beta'], prior_eps=hyperparameters['prior_eps'], alpha=hyperparameters['alpha'],
-                                            gamma=hyperparameters['gamma'], v_max=hyperparameters['v_max'], v_min=hyperparameters['v_min'], atom_size=hyperparameters['atom_size'],
-                                            max_scheduler_steps=hyperparameters['max_steps'])
-
-
-    dqn_module.train(max_steps=hyperparameters['max_steps'], epochs=hyperparameters['epochs'],buffer_size=hyperparameters['buffer_size'],
-                     batch_size=hyperparameters['batch_size'], time_horizon=hyperparameters['time_horizon'],
-                     prior_eps=hyperparameters['prior_eps'], epsilon=hyperparameters['epsilon'], update_period=hyperparameters['update_period'])
+    dqn_module.init_networks_and_optimizers(training_parameters)
+    dqn_module.train(training_parameters)

@@ -11,13 +11,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="960b84bd-6af4-4c55-afb2-b6cb4969d05a" name="Default Changelist" comment="Working SAC">
+      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Buffer.py" beforeDir="false" afterPath="$PROJECT_DIR$/buffers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/DQNMetaLearner.py" beforeDir="false" afterPath="$PROJECT_DIR$/DQNMetaLearner.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/MetaLearner.py" beforeDir="false" afterPath="$PROJECT_DIR$/MetaLearner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/PPOMetaLearner.py" beforeDir="false" afterPath="$PROJECT_DIR$/PPOMetaLearner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/SAC_Meta_Learner.py" beforeDir="false" afterPath="$PROJECT_DIR$/SAC_Meta_Learner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/meta_learner_dqn.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_rainbow.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/meta_learner_ppo.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_ppo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/meta_learner_sac.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_sac.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -46,10 +45,10 @@
     <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
     <property name="TERMINAL_CUSTOM_COMMANDS_GOT_IT" value="true" />
     <property name="com.intellij.ide.scratch.LRUPopupBuilder$1/New Scratch File" value="Python" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/../ml-agents-release_6/ml-agents/mlagents/trainers/learn.py" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/meta_learner_ppo.py" />
     <property name="settings.editor.selected.configurable" value="reference.settingsdialog.IDE.editor.colors.General" />
   </component>
-  <component name="RunManager" selected="Python.PPOMetaLearner">
+  <component name="RunManager" selected="Python.MetaLearner">
     <configuration name="MetaLearner" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -63,48 +62,6 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="PPOMetaLearner" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
-      <module name="Meta-Learner" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="C:\Users\Sebastian\anaconda3\envs\ml-agents-release-6\python.exe" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="false" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/PPOMetaLearner.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="SAC_Meta_Learner" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
-      <module name="Meta-Learner" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="C:\Users\Sebastian\anaconda3\envs\ml-agents-release-6\python.exe" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="false" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/SAC_Meta_Learner.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -134,19 +91,61 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="scratch_1" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="meta_learner_ppo" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
       <envs>
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$APPLICATION_CONFIG_DIR$/scratches" />
+      <option name="SDK_HOME" value="C:\Users\Sebastian\anaconda3\envs\ml-agents-release-6\python.exe" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
       <option name="IS_MODULE_SDK" value="false" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$APPLICATION_CONFIG_DIR$/scratches/scratch_1.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/meta_learner_ppo.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="meta_learner_rainbow" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
+      <module name="Meta-Learner" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="C:\Users\Sebastian\anaconda3\envs\ml-agents-release-6\python.exe" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\meta_learner_rainbow.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="meta_learner_sac" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
+      <module name="Meta-Learner" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="C:\Users\Sebastian\anaconda3\envs\ml-agents-release-6\python.exe" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/meta_learner_sac.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -157,16 +156,11 @@
     </configuration>
     <list>
       <item itemvalue="Python.MetaLearner" />
-      <item itemvalue="Python.PPOMetaLearner" />
-      <item itemvalue="Python.SAC_Meta_Learner" />
+      <item itemvalue="Python.meta_learner_ppo" />
+      <item itemvalue="Python.meta_learner_sac" />
       <item itemvalue="Python.learn" />
-      <item itemvalue="Python.scratch_1" />
+      <item itemvalue="Python.meta_learner_rainbow" />
     </list>
-    <recent_temporary>
-      <list>
-        <item itemvalue="Python.scratch_1" />
-      </list>
-    </recent_temporary>
   </component>
   <component name="SvnConfiguration">
     <configuration />
@@ -262,30 +256,30 @@
     <option name="LAST_COMMIT_MESSAGE" value="Working SAC" />
   </component>
   <component name="WindowStateProjectService">
-    <state x="414" y="175" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1599733971210">
+    <state x="414" y="175" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1599996645771">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="414" y="175" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1599733971210" />
-    <state x="740" y="275" key="FileChooserDialogImpl" timestamp="1599603880968">
+    <state x="414" y="175" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1599996645771" />
+    <state x="740" y="275" key="FileChooserDialogImpl" timestamp="1599996644340">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="740" y="275" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1599603880968" />
-    <state width="1899" height="282" key="GridCell.Tab.0.bottom" timestamp="1599748310411">
+    <state x="740" y="275" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1599996644340" />
+    <state width="1899" height="282" key="GridCell.Tab.0.bottom" timestamp="1599998615022">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="282" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1599748310411" />
-    <state width="1899" height="282" key="GridCell.Tab.0.center" timestamp="1599748310411">
+    <state width="1899" height="282" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1599998615022" />
+    <state width="1899" height="282" key="GridCell.Tab.0.center" timestamp="1599998615022">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="282" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1599748310411" />
-    <state width="1899" height="282" key="GridCell.Tab.0.left" timestamp="1599748310411">
+    <state width="1899" height="282" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1599998615022" />
+    <state width="1899" height="282" key="GridCell.Tab.0.left" timestamp="1599998615022">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="282" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1599748310411" />
-    <state width="1899" height="282" key="GridCell.Tab.0.right" timestamp="1599748310411">
+    <state width="1899" height="282" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1599998615022" />
+    <state width="1899" height="282" key="GridCell.Tab.0.right" timestamp="1599998615022">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="282" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1599748310411" />
+    <state width="1899" height="282" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1599998615022" />
     <state width="1877" height="348" key="GridCell.Tab.1.bottom" timestamp="1599049215037">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
@@ -310,10 +304,10 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1040@0.0.1920.1040" timestamp="1599648995870" />
-    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup" timestamp="1599572295020">
+    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup" timestamp="1599992075690">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup/0.0.1920.1040@0.0.1920.1040" timestamp="1599572295020" />
+    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup/0.0.1920.1040@0.0.1920.1040" timestamp="1599992075690" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -3,6 +3,10 @@ import torch.nn
 import numpy as np
 from typing import List
 
+from mlagents_envs.environment import UnityEnvironment
+from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
+from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
+
 import gym.spaces
 import itertools
 
@@ -20,10 +24,7 @@ def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space) 
     return condensed_q
 
 def get_probs_and_entropies(acts: torch.FloatTensor, dists: List[torch.distributions.Categorical], device):
-    # print(acts.shape[0])
-    # print('Reserved:', round(torch.cuda.memory_reserved() / 1023, 1), 'MB')
-    # print('Allocated:', round(torch.cuda.memory_allocated(0) / 1023, 1), 'MB')
-    # print('Cached: ', round(torch.cuda.memory_cached(0) / 1023, 1), 'MB')
+
     if device == 'cuda':
         test_tensor = torch.FloatTensor([0]).to(device)
         cumulated_log_probs = torch.zeros([acts.shape[0]]).to('cuda')
@@ -149,3 +150,27 @@ class ActionFlattener:
         :return: The List containing the branched actions.
         """
         return self.action_lookup[action]
+
+
+def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int, random_agent: int, random_target: int,
+                   agent_x: int = 0, agent_z: int = 0, target_x: int = 1, target_z: int = 1) -> UnityEnvironment:
+
+    engine_configuration_channel = EngineConfigurationChannel()
+    engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
+    env_parameters_channel = EnvironmentParametersChannel()
+    env_parameters_channel.set_float_parameter("maze_seed", float(maze_seed))
+    env_parameters_channel.set_float_parameter("maze_rows", float(maze_rows))
+    env_parameters_channel.set_float_parameter("maze_cols", float(maze_cols))
+    env_parameters_channel.set_float_parameter("target_x", float(target_x))
+    env_parameters_channel.set_float_parameter("target_z", float(target_z))
+    env_parameters_channel.set_float_parameter("agent_x", float(agent_x))
+    env_parameters_channel.set_float_parameter("agent_z", float(agent_z))
+    env_parameters_channel.set_float_parameter("random_agent", float(random_agent))
+    env_parameters_channel.set_float_parameter("random_target", float(random_target))
+
+    env = UnityEnvironment(file_name=env_path,
+                           base_port=5000, timeout_wait=120,
+                           no_graphics=False, seed=0,
+                           side_channels=[engine_configuration_channel, env_parameters_channel])
+
+    return env

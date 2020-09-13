@@ -12,7 +12,7 @@ from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
 from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
-from utils import torch_from_np, get_probs_and_entropies
+from utils import torch_from_np, get_probs_and_entropies, init_unity_env
 from buffers import PPOBuffer
 from models import ActorCriticPolicy
 from env_utils import step_env
@@ -32,6 +32,24 @@ class PPO_Meta_Learner:
         self.meta_step = 0
         self.policy: ActorCriticPolicy
 
+    def get_default_hyperparameters(self):
+        hyperparameters = {}
+        hyperparameters['Algorithm'] = "PPO"
+
+        hyperparameters['max_steps'] = 1000000
+        hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
+        hyperparameters['batch_size'] = 512  # Typical range: 32-512
+        hyperparameters['hidden_layers'] = 2
+        hyperparameters['layer_size'] = 256
+        hyperparameters['time_horizon'] = 64
+        hyperparameters['gamma'] = 0.99
+        hyperparameters['buffer_size'] = 20000  # Replay buffer size
+        hyperparameters['beta'] = 0.005  # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
+        hyperparameters['epsilon'] = 0.2  # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability
+        hyperparameters['lambd'] = 0.95  # Typical range: 0.9 - 0.95 GAE Parameter
+        hyperparameters['num_epochs'] = 3  # Typical range: 3 - 10
+
+        return hyperparameters
     def set_env_and_detect_spaces(self, env, task):
         env.reset()
         self.env = env
@@ -50,8 +68,12 @@ class PPO_Meta_Learner:
         self.action_space = branches
         self.env.reset()
 
-    def init_networks_and_optimizers(self, hidden_size: int, num_hidden_layers: int, max_scheduler_steps: int,
-                                     learning_rate: float):
+    def init_networks_and_optimizers(self, hyperparameters: dict):
+        hidden_size = hyperparameters['layer_size']
+        num_hidden_layers = hyperparameters['hidden_layers']
+        max_scheduler_steps = hyperparameters['max_steps']
+        learning_rate = hyperparameters['learning_rate']
+
         obs_dim = self.obs_space
         action_dim = self.action_space
         self.policy = ActorCriticPolicy(obs_dim, action_dim, hidden_size, num_hidden_layers, True).to(self.device)
@@ -61,8 +83,8 @@ class PPO_Meta_Learner:
 
         self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
 
-    def get_state_dict(self):
-        return self.policy.state_dict()
+    def get_networks(self):
+        return self.policy
 
 
     def discount_rewards(self, r, gamma=0.99, value_next=0.0):
@@ -166,7 +188,7 @@ class PPO_Meta_Learner:
 
         # Create transition dict
         transitions = {}
-        rewards = []
+        cumulative_rewards = []
         trajectory_lengths = []  # length of agent trajectories, maxlen = timehorizon/done
         episode_lengths = []
 
@@ -289,7 +311,7 @@ class PPO_Meta_Learner:
                     if done:
                         episode_lengths.append(episode_step[agent_id])
                         episode_step[agent_id] = 0
-                        rewards.append(current_added_reward[agent_id])
+                        cumulative_rewards.append(current_added_reward[agent_id])
                         current_added_reward[agent_id] = 0
 
                     trajectory_lengths.append(agent_ptr[agent_id] + 1)
@@ -348,24 +370,39 @@ class PPO_Meta_Learner:
                     actions[agent_id] = next_action
 
             first_iteration = False
-        print("Current mean Reward: " + str(np.mean(rewards)))
-        print("Current mean Episode Length: " + str(np.mean(episode_lengths)))
 
-        self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
+        print("Mean Cumulative Reward: {} at step {}".format(np.mean(cumulative_rewards), self.step))
+        print("Mean Episode Length: {} at step {}".format(np.mean(trajectory_lengths), self.step))
+
+        self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(cumulative_rewards), self.meta_step)
         self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(episode_lengths),
                                self.meta_step)
 
         print("Generated buffer of lenth: {} in {:.3f} secs.".format(buffer_length, time.time() - start_time))
 
-    def train(self, max_steps: int, buffer_size: int, time_horizon: int,
-              batch_size: int, gamma: float, beta: float, lambd: float, epsilon: float):
-        step = 0
-        while step < max_steps:
-            print("Current step: " + str(step))
+    def close_env(self):
+        self.env.close()
+
+    def train(self, hyperparameters: dict):
+
+        max_steps = hyperparameters['max_steps']
+        batch_size = hyperparameters['batch_size']
+        time_horizon = hyperparameters['time_horizon']
+        buffer_size = hyperparameters['buffer_size']
+
+        gamma = hyperparameters['gamma']
+
+        beta = hyperparameters['beta']
+        lambd = hyperparameters['lambd']
+        epsilon = hyperparameters['epsilon']
+
+        self.step = 0
+        while self.step < max_steps:
+            print("Current step: " + str(self.step))
             buffer = PPOBuffer(buffer_size=buffer_size)
             self.generate_and_fill_buffer(buffer=buffer, time_horizon=time_horizon)
             buffer_length = len(buffer)
-            step += buffer_length
+            self.step += buffer_length
             epochs = 3
             p_losses, v_losses, entropies, kls = [], [], [], []
             for i in range(epochs):
@@ -384,15 +421,18 @@ class PPO_Meta_Learner:
                 print("Current learning rate: {:.6f}".format(parameter_group['lr']))
 
             self.meta_step += 1
-            self.learning_rate_scheduler.step(epoch=step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Entropy ', np.mean(entropies), step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss ', np.mean(p_losses), step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Value Loss ', np.mean(v_losses), step)
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', np.mean(kls), step)
+            self.learning_rate_scheduler.step(epoch=self.step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Entropy ', np.mean(entropies), self.step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss ', np.mean(p_losses), self.step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Value Loss ', np.mean(v_losses), self.step)
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Approx Kullback-Leibler ', np.mean(kls), self.step)
 
 
 if __name__ == '__main__':
-    writer = SummaryWriter("results/ppo_0")
+
+    run_id = "results/ppo_0"
+
+    writer = SummaryWriter(run_id)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if device == 'cuda':
@@ -403,43 +443,35 @@ if __name__ == '__main__':
 
     ppo_module = PPO_Meta_Learner(device, writer=writer)
 
-    engine_configuration_channel = EngineConfigurationChannel()
-    engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
+    env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
+                         agent_x=0, agent_z=0, target_x=2, target_z=2)
 
-    env_parameters_channel = EnvironmentParametersChannel()
-    env_parameters_channel.set_float_parameter("seed", 5.0)
-    env = UnityEnvironment(file_name="Training/Maze.app",
-                           base_port=5000, timeout_wait=120,
-                           no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
+    training_parameters = {}
 
-    hyperparameters = {}
+    training_parameters['Algorithm'] = "PPO"
+    training_parameters['run_id'] = run_id
 
-    hyperparameters['Algorithm'] = "PPO"
 
-    hyperparameters['max_steps'] = 50000
-    hyperparameters['buffer_size'] = 2000  # Replay buffer size
-    hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
-    hyperparameters['batch_size'] = 512  # Typical range: 32-512
-    hyperparameters['hidden_layers'] = 2
-    hyperparameters['layer_size'] = 256
-    hyperparameters['time_horizon'] = 64
-    hyperparameters['gamma'] = 0.99
+    training_parameters['max_steps'] = 50000
+    training_parameters['buffer_size'] = 2000  # Replay buffer size
+    training_parameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
+    training_parameters['batch_size'] = 512  # Typical range: 32-512
+    training_parameters['hidden_layers'] = 2
+    training_parameters['layer_size'] = 256
+    training_parameters['time_horizon'] = 64
+    training_parameters['gamma'] = 0.99
 
-    hyperparameters['beta'] = 0.005 # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
-    hyperparameters['epsilon'] = 0.2 # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability
-    hyperparameters['lambd'] = 0.95 # Typical range: 0.9 - 0.95 GAE Parameter
-    hyperparameters['num_epochs'] = 3 # Typical range: 3 - 10
+    training_parameters['beta'] = 0.005 # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
+    training_parameters['epsilon'] = 0.2 # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability
+    training_parameters['lambd'] = 0.95 # Typical range: 0.9 - 0.95 GAE Parameter
+    training_parameters['num_epochs'] = 3 # Typical range: 3 - 10
 
-    writer.add_text("Hyperparameters", str(hyperparameters))
-    print("Started run with following hyperparameters:")
-    for key in hyperparameters:
-        print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
+    writer.add_text("training_parameters", str(training_parameters))
+    print("Started run with following training_parameters:")
+    for key in training_parameters:
+        print("{:<25s} {:<20s}".format(key, str(training_parameters[key])))
 
     ppo_module.set_env_and_detect_spaces(env, task=0)
-    ppo_module.init_networks_and_optimizers(hidden_size=hyperparameters['layer_size'], num_hidden_layers=hyperparameters['hidden_layers'],
-                                            learning_rate=hyperparameters['learning_rate'], max_scheduler_steps=hyperparameters['max_steps'])
+    ppo_module.init_networks_and_optimizers(training_parameters)
 
-    ppo_module.train(max_steps=hyperparameters['max_steps'], buffer_size=hyperparameters['buffer_size'],
-                     time_horizon=hyperparameters['time_horizon'], batch_size=hyperparameters['batch_size'],
-                     beta=hyperparameters['beta'], gamma=hyperparameters['gamma'], epsilon=hyperparameters['epsilon'],
-                     lambd=hyperparameters['lambd'])
+    ppo_module.train(training_parameters)

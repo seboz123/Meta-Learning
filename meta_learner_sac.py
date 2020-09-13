@@ -15,7 +15,7 @@ from mlagents_envs.side_channel.environment_parameters_channel import Environmen
 
 from buffers import SACBuffer
 from models import ActorCriticPolicy, PolicyValueNetwork, ValueNetwork
-from utils import torch_from_np, break_into_branches, condense_q_stream, get_probs_and_entropies
+from utils import torch_from_np, break_into_branches, condense_q_stream, get_probs_and_entropies, init_unity_env
 from env_utils import step_env
 
 flatten = lambda l: [item for sublist in l for item in sublist]
@@ -69,6 +69,27 @@ class SAC_Meta_Learner:
         self.obs_space: Tuple
         self.action_space: Tuple
 
+    def get_default_hyperparameters(self):
+        hyperparameters = {}
+        hyperparameters['Algorithm'] = "SAC"
+
+        hyperparameters['max_steps'] = 1000000
+        hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
+        hyperparameters['batch_size'] = 512  # Typical range: 32-512
+        hyperparameters['hidden_layers'] = 2
+        hyperparameters['layer_size'] = 256
+        hyperparameters['time_horizon'] = 64
+        hyperparameters['gamma'] = 0.99
+
+        hyperparameters['buffer_size'] = 5000  # Replay buffer size
+
+        hyperparameters['init_coeff'] = 0.5  # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
+        hyperparameters['tau'] = 0.005  # Typical range: 0.005 - 0.01 decrease for stability
+        hyperparameters['steps_per_update'] = 12  # Typical range: 1 - 20 -> Equal to number of agents in scene
+        hyperparameters['adaptive_coeff'] = True  # Whether entropy coeff should be learned
+
+        return hyperparameters
+
     def set_env_and_detect_spaces(self, env, task):
         env.reset()
         self.env = env
@@ -87,18 +108,25 @@ class SAC_Meta_Learner:
         self.action_space = branches
         self.env.reset()
 
-    def get_state_dicts(self):
-        state_dicts = []
-        state_dicts.append(self.networks.value_network.state_dict())
-        state_dicts.append(self.networks.policy_network.state_dict())
-        state_dicts.append(self.networks.target_network.state_dict())
+    def get_networks(self):
+        networks = []
+        networks.append(self.networks.value_network)
+        networks.append(self.networks.policy_network)
+        networks.append(self.networks.target_network)
         if self.networks.use_adaptive_entropy_coeff:
-            state_dicts.append(self.networks.log_entropy_coeff)
+            networks.append(self.networks.log_entropy_coeff)
 
-        return state_dicts
+        return networks
 
-    def init_networks_and_optimizers(self, init_ent_coeff: float, adaptive_coeff: bool, hidden_size: int, hidden_layers: int, max_scheduler_steps: int,
-                                     learning_rate: float):
+    def init_networks_and_optimizers(self, hyperparameters: dict):
+
+        init_ent_coeff = hyperparameters['init_coeff']
+        adaptive_coeff = hyperparameters['adaptive_coeff']
+        hidden_size = hyperparameters['layer_size']
+        hidden_layers = hyperparameters['hidden_layers']
+        max_scheduler_steps = hyperparameters['max_steps']
+        learning_rate = hyperparameters['learning_rate']
+
         obs_dim = self.obs_space
         action_dim = self.action_space
         self.networks = TorchNetworks(obs_dim, action_dim, hidden_size, hidden_layers, init_entropy_coeff=init_ent_coeff, adaptive_ent_coeff=adaptive_coeff, device=self.device)
@@ -243,7 +271,7 @@ class SAC_Meta_Learner:
         trajectory_lengths = []  # length of agent trajectories, maxlen = timehorizon/done
 
         episode_lengths = []
-        rewards = []
+        cumulative_rewards = []
 
         appended_steps = 0
 
@@ -348,7 +376,7 @@ class SAC_Meta_Learner:
                     if done:
                         episode_lengths.append(agent_current_step[agent_id])
                         agent_current_step[agent_id] = 0
-                        rewards.append(current_added_reward[agent_id])
+                        cumulative_rewards.append(current_added_reward[agent_id])
                         current_added_reward[agent_id] = 0
 
                     trajectory_lengths.append(agent_ptr[agent_id] + 1)
@@ -411,25 +439,37 @@ class SAC_Meta_Learner:
             first_iteration = False
 
         # If this update step has generated new finished episodes, report them
-        if len(rewards) > 0:
-            print("Current mean Reward: " + str(np.mean(rewards)))
-            print("Current mean Episode Length: " + str(np.mean(episode_lengths)))
+        if len(cumulative_rewards) > 0:
+            print("Mean Cumulative Reward: {} at step {}".format(np.mean(cumulative_rewards), self.step))
+            print("Mean Episode Length: {} at step {}".format(np.mean(trajectory_lengths), self.step))
 
-            self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(rewards), self.meta_step)
-
+            self.writer.add_scalar('Task: ' + str(self.task) + '/Cumulative Reward', np.mean(cumulative_rewards),
+                                   self.meta_step)
             self.writer.add_scalar('Task: ' + str(self.task) + '/Mean Episode Length', np.mean(episode_lengths),
-                               self.meta_step)
+                                   self.meta_step)
 
         return buffer, appended_steps
 
-    def train(self, max_steps, batch_size, time_horizon, gamma, buffer_size, steps_per_update, tau):
+    def close_env(self):
+        self.env.close()
+
+    def train(self, hyperparameters: dict):
+        max_steps = hyperparameters['max_steps']
+        batch_size = hyperparameters['batch_size']
+        time_horizon = hyperparameters['time_horizon']
+        gamma = hyperparameters['gamma']
+        buffer_size = hyperparameters['buffer_size']
+
+        steps_per_update = hyperparameters['steps_per_update']
+        tau = hyperparameters['tau']
+
         replay_buffer = SACBuffer(max_buffer_size=buffer_size, action_space=sac_module.action_space)
 
-        steps = 0
-        while steps < max_steps:
+        self.step = 0
+        while self.step < max_steps:
             buffer, steps_taken = self.generate_trajectories_and_fill_buffer(buffer=replay_buffer, time_horizon=time_horizon)
             print("Steps taken since last update: {}".format(steps_taken))
-            steps += steps_taken
+            self.step += steps_taken
             update_steps = 0
             frame_start = time.time()
             value_losses = []
@@ -461,19 +501,19 @@ class SAC_Meta_Learner:
                 self.value_optimizer.step()
                 self.entropy_optimizer.step()
 
-                self.learning_rate_scheduler_e.step(epoch=steps)
-                self.learning_rate_scheduler_p.step(epoch=steps)
-                self.learning_rate_scheduler_v.step(epoch=steps)
+                self.learning_rate_scheduler_e.step(epoch=self.step)
+                self.learning_rate_scheduler_p.step(epoch=self.step)
+                self.learning_rate_scheduler_v.step(epoch=self.step)
 
                 self.networks.soft_update(self.networks.policy_network.critic,
                                                 self.networks.target_network, tau=tau)
 
                 update_steps += 1
-            writer.add_scalar('Task: ' + str(self.task) + '/Value Loss', np.mean(value_losses), steps)
-            writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss', np.mean(policy_losses), steps)
-            writer.add_scalar('Task: ' + str(self.task) + '/Entropy Loss', np.mean(entropy_losses), steps)
-            writer.add_scalar('Task: ' + str(self.task) + '/Q1 Loss', np.mean(q1_losses), steps)
-            writer.add_scalar('Task: ' + str(self.task) + '/Q2 Loss', np.mean(q2_losses), steps)
+            writer.add_scalar('Task: ' + str(self.task) + '/Value Loss', np.mean(value_losses), self.step)
+            writer.add_scalar('Task: ' + str(self.task) + '/Policy Loss', np.mean(policy_losses), self.step)
+            writer.add_scalar('Task: ' + str(self.task) + '/Entropy Loss', np.mean(entropy_losses), self.step)
+            writer.add_scalar('Task: ' + str(self.task) + '/Q1 Loss', np.mean(q1_losses), self.step)
+            writer.add_scalar('Task: ' + str(self.task) + '/Q2 Loss', np.mean(q2_losses), self.step)
 
             frame_end = time.time()
             print("Current Update rate = {} updates per second".format(steps_taken / (frame_end - frame_start)))
@@ -481,7 +521,9 @@ class SAC_Meta_Learner:
 
 
 if __name__ == '__main__':
-    writer = SummaryWriter("results/sac_0")
+
+    run_id = "results/sac_0"
+    writer = SummaryWriter(run_id)
 
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -493,48 +535,39 @@ if __name__ == '__main__':
 
     sac_module = SAC_Meta_Learner(device, writer=writer)
 
-    engine_configuration_channel = EngineConfigurationChannel()
-    engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
-
-    env_parameters_channel = EnvironmentParametersChannel()
-    env_parameters_channel.set_float_parameter("seed", 5.0)
-    env = UnityEnvironment(file_name="Training/Maze.app",
-                           base_port=5000, timeout_wait=120,
-                           no_graphics=False, seed=0, side_channels=[engine_configuration_channel, env_parameters_channel])
+    env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=2, target_z=2)
 
     ########################## Hyperparameters for train Run ############################
     #####################################################################################
 
-    hyperparameters = {}
+    training_parameters = {}
 
-    hyperparameters['Algorithm'] = "SAC"
+    training_parameters['Algorithm'] = "SAC"
+    training_parameters['run_id'] = run_id
 
-    hyperparameters['max_steps'] = 1000000
-    hyperparameters['buffer_size'] = 2000 # Replay buffer size
-    hyperparameters['learning_rate'] = 0.0001 # Typical range: 0.00001 - 0.001
-    hyperparameters['batch_size'] = 512 # Typical range: 32-512
-    hyperparameters['hidden_layers'] = 2
-    hyperparameters['layer_size'] = 256
-    hyperparameters['time_horizon'] = 64
-    hyperparameters['gamma'] = 0.99
 
-    hyperparameters['init_coeff'] = 0.5 # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
-    hyperparameters['tau'] = 0.005 # Typical range: 0.005 - 0.01 decrease for stability
-    hyperparameters['steps_per_update'] = 1 # Typical range: 1 - 20 -> Equal to number of agents in scene
-    hyperparameters['adaptive_coeff'] = True # Whether entropy coeff should be learned
+    training_parameters['max_steps'] = 1000000
+    training_parameters['buffer_size'] = 2000 # Replay buffer size
+    training_parameters['learning_rate'] = 0.0001 # Typical range: 0.00001 - 0.001
+    training_parameters['batch_size'] = 512 # Typical range: 32-512
+    training_parameters['hidden_layers'] = 2
+    training_parameters['layer_size'] = 256
+    training_parameters['time_horizon'] = 64
+    training_parameters['gamma'] = 0.99
 
-    writer.add_text("Hyperparameters", str(hyperparameters))
+    training_parameters['init_coeff'] = 0.5 # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
+    training_parameters['tau'] = 0.005 # Typical range: 0.005 - 0.01 decrease for stability
+    training_parameters['steps_per_update'] = 1 # Typical range: 1 - 20 -> Equal to number of agents in scene
+    training_parameters['adaptive_coeff'] = True # Whether entropy coeff should be learned
+
+    writer.add_text("training_parameters", str(training_parameters))
     print("Started run with following hyperparameters:")
-    for key in hyperparameters:
-        print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
+    for key in training_parameters:
+        print("{:<25s} {:<20s}".format(key, str(training_parameters[key])))
 
     sac_module.set_env_and_detect_spaces(env, task=0)
-    sac_module.init_networks_and_optimizers(init_ent_coeff=hyperparameters['init_coeff'], hidden_layers=hyperparameters['hidden_layers'],
-                                            hidden_size=hyperparameters['layer_size'], adaptive_coeff=hyperparameters['adaptive_coeff'],
-                                      max_scheduler_steps=hyperparameters['max_steps'], learning_rate=hyperparameters['learning_rate'])
 
-    sac_module.train(max_steps=hyperparameters['max_steps'], batch_size=hyperparameters['batch_size'],
-                     time_horizon=hyperparameters['time_horizon'], gamma=hyperparameters['gamma'],
-                     steps_per_update=hyperparameters['steps_per_update'], tau=hyperparameters['tau'])
+    sac_module.init_networks_and_optimizers(training_parameters)
+    sac_module.train(training_parameters)
 
 
