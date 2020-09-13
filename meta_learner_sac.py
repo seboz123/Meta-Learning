@@ -84,7 +84,7 @@ class SAC_Meta_Learner:
         hyperparameters['decay_lr'] = True
 
 
-        hyperparameters['buffer_size'] = 5000  # Replay buffer size
+        hyperparameters['buffer_size'] = 30000  # Replay buffer size
 
         hyperparameters['init_coeff'] = 0.5  # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
         hyperparameters['tau'] = 0.005  # Typical range: 0.005 - 0.01 decrease for stability
@@ -467,17 +467,19 @@ class SAC_Meta_Learner:
         steps_per_update = hyperparameters['steps_per_update']
         tau = hyperparameters['tau']
 
-        replay_buffer = SACBuffer(max_buffer_size=buffer_size, action_space=sac_module.action_space)
+        print("Started SAC training with {} steps to take".format(hyperparameters['max_steps']))
+
+        replay_buffer = SACBuffer(max_buffer_size=buffer_size, action_space=self.action_space)
 
         mean_rewards = []
         mean_episode_lengths = []
+        self.step = 0
 
         while self.step < max_steps:
             buffer, steps_taken, mean_reward, mean_episode_length = self.generate_trajectories_and_fill_buffer(buffer=replay_buffer, time_horizon=time_horizon)
             mean_rewards.append(mean_reward)
             mean_episode_lengths.append(mean_episode_length)
 
-            print("Steps taken since last update: {}".format(steps_taken))
             self.step += steps_taken
             update_steps = 0
             frame_start = time.time()
@@ -538,7 +540,7 @@ class SAC_Meta_Learner:
 
 if __name__ == '__main__':
 
-    run_id = "results/sac_0"
+    run_id = "results/sac_1"
     writer = SummaryWriter(run_id)
 
 

@@ -49,6 +49,16 @@ class MetaLearner():
 
         updated_parameters = None
 
+        hyperparameters = learner.get_default_hyperparameters()
+        hyperparameters['buffer_size'] = 20000
+        hyperparameters['max_steps'] = 60000
+        hyperparameters['decay_lr'] = False
+        hyperparameters['learning_rate'] = 0.0003
+
+        self.writer.add_text("Hyperparameters", str(hyperparameters))
+        print("Hyperparameters for this run")
+        print(str(hyperparameters))
+
         for meta_step in range(num_meta_updates):
             meta_start = time.time()
             print("Meta step: {} of {}".format(meta_step, num_meta_updates))
@@ -56,12 +66,9 @@ class MetaLearner():
             task, task_number = self.sample_class()
 
 
-            hyperparameters = learner.get_default_hyperparameters()
-            hyperparameters['buffer_size'] = 20000
-            hyperparameters['max_steps'] = 60000
-            hyperparameters['decay_lr'] = False
-            hyperparameters['learning_rate'] = 0.0003
+
             hyperparameters['learning_rate'] = hyperparameters['learning_rate'] * (1 - meta_step/num_meta_updates)
+
 
             learner.set_env_and_detect_spaces(task, task_number)
             learner.init_networks_and_optimizers(hyperparameters)
@@ -127,58 +134,11 @@ class MetaLearner():
             learner.close_env()
             print("Meta update took {:.3f}s".format(time.time()-meta_start))
 
-            ############## Meta Updates ##################
-
-            # elif algorithm == 'fomaml':
-            #     # Reset params to old params
-            #
-            #     self.policy.dqn.load_state_dict(theta_before)
-            #     # Perform meta learning
-            #     with torch.no_grad():
-            #         for parameter in self.policy.dqn.parameters():
-            #             parameter -= self.meta_lr * parameter.grad
-            #         self.policy.dqn.zero_grad()
-            #
-            # self.policy.eval_policy(num_trajectories=20, max_trajectory_length=600, task=task_number)
-            # # Meta update step
-            #
-            # if algorithm == 'reptile':
-            #     # Meta update with SGD, change weights to theta_before weights and perform gradient step
-            #     theta_after = [self.policy.dqn.state_dict(),
-            #                     self.curiosity.forwardModel.state_dict(),
-            #                     self.curiosity.inverseModel.state_dict()]
-            #     self.policy.dqn.load_state_dict(
-            #         {name: theta_before[0][name] + (theta_after[0][name] - theta_before[0][name]) * self.meta_lr for name in
-            #          theta_before[0]})  # Perform meta update
-            #     self.curiosity.forwardModel.load_state_dict(
-            #         {name: theta_before[1][name] + (theta_after[1][name] - theta_before[1][name]) * self.meta_lr for name in
-            #          theta_before[1]})
-            #     self.curiosity.inverseModel.load_state_dict(
-            #         {name: theta_before[2][name] + (theta_after[2][name] - theta_before[2][name]) * self.meta_lr for name in
-            #          theta_before[2]})
-            #     self.policy.dqn_target.load_state_dict(self.policy.dqn.state_dict())  # Reset target network weights
-            # elif algorithm == 'fomaml':
-            #     # Reset params to old params
-            #     self.policy.dqn.load_state_dict(theta_before)
-            #     # Perform meta learning
-            #     with torch.no_grad():
-            #         for parameter in self.policy.dqn.parameters():
-            #             parameter -= self.meta_lr * parameter.grad
-            #         self.policy.dqn.zero_grad()
-            # elif algorithm == 'somaml':
-            #     pass
-            # else:
-            #     print("Please enter a valid algorithm: somaml, fomaml or reptile")
-            #     exit(-1)
-            #
-            # self.policy.meta_step += 1
-            # print("Meta update performed in: {:0.3f}s".format(time.time()-meta_start))
-
 
 if __name__ == '__main__':
 
-    run_id = "results/meta_0"
-    learner_algorithm = 'ppo'
+    run_id = "results/meta_sac_3"
+    learner_algorithm = 'sac'
     meta_learn_algorithm = 'reptile'
 
     meta_writer = SummaryWriter(run_id)
