@@ -2,19 +2,31 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+from buffers import SACBuffer, PPOBuffer
+import numpy as np
 
-from utils import Swish
-
+from utils import Swish, torch_from_np, actions_to_onehot
 
 class CuriosityModule():
-    def __init__(self, obs_size: int, enc_size: int, enc_layers: int, device: torch.device, action_flattener,
-                 learning_rate: int = 0.001):
+    def __init__(self, obs_size: int, enc_size: int, hidden_layers: int, hidden_size: int,device: torch.device,
+                 learning_rate: int = 0.001, action_shape=None, action_flattener=None):
+        assert action_shape is not None or action_flattener is not None
         self.device = device
+        self.action_shape = action_shape
+        self.action_flattener = action_flattener
 
-        self.encoderModel = VectorEncoder(obs_size, enc_size, enc_layers).to(device)
+        self.encoderModel = VectorEncoder(obs_size, enc_size, hidden_layers).to(device)
 
-        self.forwardModel = ForwardModel(enc_size, sum(action_flattener.action_shape)).to(device)
-        self.inverseModel = InverseModel(enc_size, action_flattener.action_shape).to(device)
+        if action_shape is not None:
+            self.forwardModel = ForwardModel(enc_size=enc_size, act_size=len(action_shape), hidden_size=hidden_size, hidden_layers=hidden_layers).to(device)
+            self.inverseModel = InverseModel(enc_size=enc_size, act_size=action_shape, hidden_size=hidden_size, hidden_layers=hidden_layers).to(device)
+
+        elif action_flattener is not None:
+            self.forwardModel = ForwardModel(enc_size=enc_size, act_size=sum(action_flattener.action_shape), hidden_size=hidden_size, hidden_layers=hidden_layers).to(device)
+            self.inverseModel = InverseModel(enc_size=enc_size, act_size=action_flattener.action_shape, hidden_size=hidden_size, hidden_layers=hidden_layers).to(device)
+
+
+        self.networks = [self.encoderModel, self.forwardModel, self.inverseModel]
 
         # self.flattener = action_flattener
         parameters = list(self.forwardModel.parameters()) + list(self.inverseModel.parameters()) + list(
@@ -25,7 +37,11 @@ class CuriosityModule():
 
         self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=exp_schedule)
 
-    def calc_loss(self, memory_n, indices) -> torch.Tensor:
+    def get_networks(self):
+        return self.networks
+
+
+    def calc_loss_rainbow(self, memory_n, indices) -> torch.Tensor:
         samples = memory_n.sample_batch_from_idxs(indices)
         action_shape = self.flattener.action_shape
         actions = []
@@ -58,6 +74,48 @@ class CuriosityModule():
 
         return forward_loss, inverse_loss
 
+    def calc_loss_ppo_sac(self, batch):
+        actions = torch_from_np(batch.actions, self.device).to(dtype=torch.float32)
+        obs = torch_from_np(batch.observations, self.device).to(dtype=torch.float32)
+        next_obs = torch_from_np(batch.next_observations, self.device).to(dtype=torch.float32)
+
+        encoded_obs = self.encoderModel(obs).to(dtype=torch.float32)
+        encoded_next_obs = self.encoderModel(next_obs).to(dtype=torch.float32)
+
+        pred_states = self.forwardModel(encoded_obs, actions)
+
+        pred_acts = self.inverseModel(encoded_obs, encoded_next_obs)
+
+        # Calculate MSE and Cross-Entropy-Error
+        mean_squared_loss = nn.MSELoss()
+
+
+        if self.action_shape is not None:
+            one_hot = actions_to_onehot(actions,self.action_shape)
+        true_actions = torch.cat(one_hot, dim=1)
+
+        cross_entropy_loss = -torch.log(pred_acts + 1e-10) * true_actions
+        inverse_loss = torch.mean(torch.sum(cross_entropy_loss, dim=1))
+
+        forward_loss = mean_squared_loss(pred_states, encoded_next_obs)
+
+        return forward_loss, inverse_loss
+
+    def evaluate(self, obs, acts, next_obs):
+        with torch.no_grad():
+            obs = torch_from_np(obs, self.device)
+            actions = torch_from_np(acts, self.device)
+            next_obs = torch_from_np(next_obs, self.device)
+
+            encoded_obs = self.encoderModel(obs)
+            predicted_next_obs = self.forwardModel(encoded_obs, actions)
+            encoded_next_obs = self.encoderModel(next_obs)
+
+            squared_error = torch.sum(0.5 * (predicted_next_obs - encoded_next_obs)**2, dim=1)
+            return squared_error
+
+
+
 
 class VectorEncoder(nn.Module):
     def __init__(
@@ -81,22 +139,24 @@ class ForwardModel(nn.Module):
             self,
             enc_size: int,
             act_size: int,
-            num_layers: int
+            hidden_size: int,
+            hidden_layers: int
     ):
         super(ForwardModel, self).__init__()
         layers = [nn.Sequential(
-            nn.Linear(enc_size + act_size, enc_size),
+            nn.Linear(enc_size + act_size, hidden_size),
             Swish()
         )]
-        for _ in range(num_layers - 1):
+        for _ in range(hidden_layers - 1):
             layers.append(nn.Sequential(
-                nn.Linear(enc_size, enc_size),
+                nn.Linear(hidden_size, hidden_size),
                 Swish()
             ))
-        self.layers = nn.Sequential(*layers)
+        out_layer = nn.Linear(hidden_size, enc_size)
+        self.layers = nn.Sequential(*layers, out_layer)
 
-    def forward(self, obs: torch.Tensor, act: torch.Tensor) -> torch.Tensor:
-        combined = torch.cat([obs, act.to(dtype=torch.float32)], dim=1)
+    def forward(self, enc_state: torch.Tensor, act: torch.Tensor) -> torch.Tensor:
+        combined = torch.cat([enc_state, act], dim=1)
         enc_state = self.layers(combined)
         return enc_state
 
@@ -123,8 +183,11 @@ class InverseModel(nn.Module):
         self.out_layers = nn.Sequential(
             *[nn.Sequential(nn.Linear(hidden_size, shape), nn.Softmax()) for shape in act_size])
 
-    def forward(self, obs: torch.Tensor, next_obs: torch.Tensor) -> torch.Tensor:
-        combined = torch.cat([obs, next_obs], dim=1)
+    def forward(self, encoded_obs: torch.Tensor, encoded_next_obs: torch.Tensor) -> torch.Tensor:
+        combined = torch.cat([encoded_obs, encoded_next_obs], dim=1)
         hidden = self.hidden_layers(combined)
-        pred_action = torch.cat([layer(hidden) for layer in self.out_layers], dim=1)
+        actions = []
+        for layer in self.out_layers:
+            actions.append(layer(hidden))
+        pred_action = torch.cat([branch for branch in actions], dim=1)
         return pred_action

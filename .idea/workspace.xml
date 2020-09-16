@@ -13,8 +13,12 @@
     <list default="true" id="960b84bd-6af4-4c55-afb2-b6cb4969d05a" name="Default Changelist" comment="Working SAC">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/MetaLearner.py" beforeDir="false" afterPath="$PROJECT_DIR$/MetaLearner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/buffers.py" beforeDir="false" afterPath="$PROJECT_DIR$/buffers.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/curiosity_module.py" beforeDir="false" afterPath="$PROJECT_DIR$/curiosity_module.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/meta_learner_ppo.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_ppo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/meta_learner_rainbow.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_rainbow.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/meta_learner_sac.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_sac.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/models.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -42,7 +46,7 @@
     <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
     <property name="TERMINAL_CUSTOM_COMMANDS_GOT_IT" value="true" />
     <property name="com.intellij.ide.scratch.LRUPopupBuilder$1/New Scratch File" value="Python" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/meta_learner_ppo.py" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$" />
     <property name="settings.editor.selected.configurable" value="reference.settingsdialog.IDE.editor.colors.General" />
   </component>
   <component name="RunManager" selected="Python.MetaLearner">
@@ -240,7 +244,14 @@
       <option name="project" value="LOCAL" />
       <updated>1600012112666</updated>
     </task>
-    <option name="localTasksCounter" value="11" />
+    <task id="LOCAL-00011" summary="Working meta learner. Updates in curiosity">
+      <created>1600027873370</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1600027873370</updated>
+    </task>
+    <option name="localTasksCounter" value="12" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -266,7 +277,8 @@
     <MESSAGE value="Working SAC" />
     <MESSAGE value="Meta Learner restructure" />
     <MESSAGE value="Working meta learner reptile, restructure of summary writer" />
-    <option name="LAST_COMMIT_MESSAGE" value="Working meta learner reptile, restructure of summary writer" />
+    <MESSAGE value="Working meta learner. Updates in curiosity" />
+    <option name="LAST_COMMIT_MESSAGE" value="Working meta learner. Updates in curiosity" />
   </component>
   <component name="WindowStateProjectService">
     <state x="414" y="175" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1599996645771">
@@ -277,22 +289,22 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="740" y="275" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1599996644340" />
-    <state width="1899" height="315" key="GridCell.Tab.0.bottom" timestamp="1600027824576">
+    <state width="1899" height="315" key="GridCell.Tab.0.bottom" timestamp="1600297123273">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="315" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1600027824576" />
-    <state width="1899" height="315" key="GridCell.Tab.0.center" timestamp="1600027824576">
+    <state width="1899" height="315" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1600297123273" />
+    <state width="1899" height="315" key="GridCell.Tab.0.center" timestamp="1600297123272">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="315" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1600027824576" />
-    <state width="1899" height="315" key="GridCell.Tab.0.left" timestamp="1600027824576">
+    <state width="1899" height="315" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1600297123272" />
+    <state width="1899" height="315" key="GridCell.Tab.0.left" timestamp="1600297123272">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="315" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1600027824576" />
-    <state width="1899" height="315" key="GridCell.Tab.0.right" timestamp="1600027824576">
+    <state width="1899" height="315" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1600297123272" />
+    <state width="1899" height="315" key="GridCell.Tab.0.right" timestamp="1600297123273">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="315" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1600027824576" />
+    <state width="1899" height="315" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1600297123273" />
     <state width="1877" height="348" key="GridCell.Tab.1.bottom" timestamp="1599049215037">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
@@ -313,14 +325,18 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="461" y="165" key="SettingsEditor/0.0.1920.1040@0.0.1920.1040" timestamp="1598528064261" />
-    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1600011166264">
+    <state width="498" height="446" key="SwitcherDM" timestamp="1600274545155">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1040@0.0.1920.1040" timestamp="1600011166264" />
-    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup" timestamp="1599992075690">
+    <state width="498" height="446" key="SwitcherDM/0.0.1920.1040@0.0.1920.1040" timestamp="1600274545155" />
+    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1600292030403">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup/0.0.1920.1040@0.0.1920.1040" timestamp="1599992075690" />
+    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1040@0.0.1920.1040" timestamp="1600292030403" />
+    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup" timestamp="1600036740057">
+      <screen x="0" y="0" width="1920" height="1040" />
+    </state>
+    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup/0.0.1920.1040@0.0.1920.1040" timestamp="1600036740057" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

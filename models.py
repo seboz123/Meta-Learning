@@ -9,7 +9,7 @@ import numpy as np
 
 class ActorCriticPolicy(nn.Module):
     class SharedActorCritic(nn.Module):
-        def __init__(self, state_dim, act_dim, hidden_size, num_hidden_layers):
+        def __init__(self, state_dim, act_dim, hidden_size, num_hidden_layers, enable_curiosity: bool):
             nn.Module.__init__(self)
             body = [nn.Sequential(
                 nn.Linear(state_dim, hidden_size),
@@ -24,19 +24,24 @@ class ActorCriticPolicy(nn.Module):
                 *[nn.Sequential(nn.Linear(hidden_size, shape), nn.Softmax(dim=-1)) for shape in
                   act_dim])
             self.value_out = nn.Linear(hidden_size, 1)
+            if enable_curiosity:
+                self.curiosity_value = nn.Linear(hidden_size, 1)
 
         def forward(self, obs: torch.Tensor):
             hidden = self.body(obs)
             dists = []
+            actions = []
             for layer in self.actions_out:
-                action_out = layer(hidden)
-                dist = Categorical(action_out)
+                action_probs = layer(hidden)
+                dist = Categorical(action_probs)
                 dists.append(dist)
+                actions.append(dist.sample())
             value = self.value_out(hidden)
-            return dists, value
+            curiosity_value = self.curiosity_value(hidden)
+            return dists, value, actions, curiosity_value
 
     class Critic(nn.Module):
-        def __init__(self, state_dim, hidden_size, num_hidden_layers):
+        def __init__(self, state_dim, hidden_size, num_hidden_layers, enable_curiosity: bool):
             nn.Module.__init__(self)
 
             hidden_layers = [nn.Sequential(
@@ -90,14 +95,13 @@ class ActorCriticPolicy(nn.Module):
 
             return dists
 
-    def __init__(self, state_dim, action_dim, hidden_size: int = 256, num_hidden_layers: int = 2,
-                 shared_actor_critic: bool = False):
+    def __init__(self, state_dim, action_dim, hyperparameters: {}, shared_actor_critic: bool):
         super(ActorCriticPolicy, self).__init__()
         if not shared_actor_critic:
-            self.critic = self.Critic(state_dim, hidden_size, num_hidden_layers)
-            self.actor = self.Actor(state_dim, action_dim, hidden_size, num_hidden_layers)
+            self.critic = self.Critic(state_dim, hyperparameters['layer_size'], hyperparameters['hidden_layers'], hyperparameters['enable_curiosity'])
+            self.actor = self.Actor(state_dim, action_dim, hyperparameters['layer_size'], hyperparameters['hidden_layers'])
         else:
-            self.policy = self.SharedActorCritic(state_dim, action_dim, hidden_size, num_hidden_layers)
+            self.policy = self.SharedActorCritic(state_dim, action_dim, hyperparameters['layer_size'], hyperparameters['hidden_layers'], hyperparameters['enable_curiosity'])
 
 
 class ValueNetwork(nn.Module):

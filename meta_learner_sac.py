@@ -5,16 +5,11 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
-
-
-from mlagents_envs.environment import UnityEnvironment
-from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
-from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
 from buffers import SACBuffer
 from models import ActorCriticPolicy, PolicyValueNetwork, ValueNetwork
+from curiosity_module import CuriosityModule
 from utils import torch_from_np, break_into_branches, condense_q_stream, get_probs_and_entropies, init_unity_env
 from env_utils import step_env
 
@@ -22,11 +17,16 @@ flatten = lambda l: [item for sublist in l for item in sublist]
 
 
 class TorchNetworks:
-    def __init__(self, obs_dim, act_dim, hidden_size, num_hidden_layers, init_entropy_coeff, adaptive_ent_coeff, device):
+    def __init__(self, hyperparameters: {}, obs_dim, act_dim, device):
+        hidden_size = hyperparameters['layer_size']
+        num_hidden_layers = hyperparameters['hidden_layers']
+        init_entropy_coeff = hyperparameters['init_coeff']
+        adaptive_ent_coeff = hyperparameters['adaptive_coeff']
+
         self.device = device
         self.discrete_target_entropy_scale = 0.2
         self.init_entropy_coeff = init_entropy_coeff
-        self.policy_network = ActorCriticPolicy(obs_dim, act_dim, 256).to(device)  # Pi
+        self.policy_network = ActorCriticPolicy(obs_dim, act_dim, hyperparameters, False).to(device)  # Pi
 
         self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers).to(
             device)  # Q
@@ -41,7 +41,8 @@ class TorchNetworks:
                 requires_grad=True
             ).to(device)
         else:
-            self.log_entropy_coeff = self.init_entropy_coeff
+            self.log_entropy_coeff = torch.log(torch.as_tensor([self.init_entropy_coeff] * len(act_dim))).to(device)
+
         self.target_entropy = [self.discrete_target_entropy_scale * np.log(i).astype(np.float32) for i in act_dim]
 
         # self.policy_params = list(self.policy_network.parameters())
@@ -53,9 +54,6 @@ class TorchNetworks:
 
 
 class SAC_Meta_Learner:
-    """
-    """
-
     def __init__(
             self,
             device: str,
@@ -69,10 +67,16 @@ class SAC_Meta_Learner:
         self.policy: ActorCriticPolicy
         self.obs_space: Tuple
         self.action_space: Tuple
+        self.enable_curiosity = False
+        self.curiosity = None
 
     def get_default_hyperparameters(self):
         hyperparameters = {}
         hyperparameters['Algorithm'] = "SAC"
+
+        hyperparameters['enable_curiosity'] = True
+        hyperparameters['curiosity_lambda'] = 0.1 # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
+        hyperparameters['curiosity_beta'] = 0.2 # Factor for using more of forward loss or more of inverse loss
 
         hyperparameters['max_steps'] = 1000000
         hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
@@ -83,10 +87,10 @@ class SAC_Meta_Learner:
         hyperparameters['gamma'] = 0.99
         hyperparameters['decay_lr'] = True
 
-
         hyperparameters['buffer_size'] = 30000  # Replay buffer size
 
-        hyperparameters['init_coeff'] = 0.5  # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
+        hyperparameters[
+            'init_coeff'] = 0.5  # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
         hyperparameters['tau'] = 0.005  # Typical range: 0.005 - 0.01 decrease for stability
         hyperparameters['steps_per_update'] = 12  # Typical range: 1 - 20 -> Equal to number of agents in scene
         hyperparameters['adaptive_coeff'] = True  # Whether entropy coeff should be learned
@@ -111,30 +115,17 @@ class SAC_Meta_Learner:
         self.action_space = branches
         self.env.reset()
 
-    def get_networks_and_parameters(self) -> dict:
-        networks_and_parameters = {}
-        networks_and_parameters['networks'] = []
-        networks_and_parameters['networks'].append(self.networks.value_network)
-        networks_and_parameters['networks'].append(self.networks.policy_network)
-        networks_and_parameters['networks'].append(self.networks.target_network)
-        networks_and_parameters['parameters'] = []
-        if self.networks.use_adaptive_entropy_coeff:
-            networks_and_parameters['parameters'].append(self.networks.log_entropy_coeff)
-
-        return networks_and_parameters
-
     def init_networks_and_optimizers(self, hyperparameters: dict):
 
-        init_ent_coeff = hyperparameters['init_coeff']
         adaptive_coeff = hyperparameters['adaptive_coeff']
-        hidden_size = hyperparameters['layer_size']
-        hidden_layers = hyperparameters['hidden_layers']
+
         max_scheduler_steps = hyperparameters['max_steps']
         learning_rate = hyperparameters['learning_rate']
 
         obs_dim = self.obs_space
         action_dim = self.action_space
-        self.networks = TorchNetworks(obs_dim, action_dim, hidden_size, hidden_layers, init_entropy_coeff=init_ent_coeff, adaptive_ent_coeff=adaptive_coeff, device=self.device)
+
+        self.networks = TorchNetworks(hyperparameters, obs_dim, action_dim, device=self.device)
         self.policy = self.networks.policy_network
 
         value_parameters = list(self.networks.value_network.parameters()) + list(self.policy.critic.parameters())
@@ -143,15 +134,37 @@ class SAC_Meta_Learner:
         self.all_parameters = value_parameters + policy_parameters
 
         self.policy_optimizer = optim.Adam(policy_parameters, lr=learning_rate)
-        self.value_optimizer = optim.Adam(value_parameters, lr=learning_rate)
-        self.entropy_optimizer = optim.Adam([self.networks.log_entropy_coeff], lr=learning_rate)
 
+        self.value_optimizer = optim.Adam(value_parameters, lr=learning_rate)
         linear_schedule = lambda epoch: max((1 - epoch / max_scheduler_steps), 1e-6)
 
+        if adaptive_coeff:
+            self.entropy_optimizer = optim.Adam([self.networks.log_entropy_coeff], lr=learning_rate)
+            self.learning_rate_scheduler_e = optim.lr_scheduler.LambdaLR(self.entropy_optimizer,
+                                                                         lr_lambda=linear_schedule)
         self.learning_rate_scheduler_p = optim.lr_scheduler.LambdaLR(self.policy_optimizer, lr_lambda=linear_schedule)
         self.learning_rate_scheduler_v = optim.lr_scheduler.LambdaLR(self.value_optimizer, lr_lambda=linear_schedule)
-        self.learning_rate_scheduler_e = optim.lr_scheduler.LambdaLR(self.entropy_optimizer, lr_lambda=linear_schedule)
 
+        if hyperparameters['enable_curiosity']:
+            self.enable_curiosity = True
+            self.curiosity = CuriosityModule(obs_size=obs_dim, enc_size=64, hidden_layers=2, hidden_size=128,
+                                             learning_rate=0.003, device=self.device, action_shape=action_dim)
+            print("Enabled curiosity module")
+
+    def get_networks_and_parameters(self) -> dict:
+        networks_and_parameters = {}
+        networks_and_parameters['networks'] = []
+        networks_and_parameters['networks'].append(self.networks.value_network)
+        networks_and_parameters['networks'].append(self.networks.policy_network)
+        # networks_and_parameters['networks'].append(self.networks.target_network)
+        networks_and_parameters['parameters'] = []
+        if self.networks.use_adaptive_entropy_coeff:
+            networks_and_parameters['parameters'].append(self.networks.log_entropy_coeff)
+        if self.curiosity is not None:
+            for network in self.curiosity.get_networks():
+                networks_and_parameters['networks'].append(network)
+
+        return networks_and_parameters
 
     def calc_q_loss(self, q1_out, q2_out, target_values, dones, rewards, gamma):
         q1_out = q1_out.squeeze()
@@ -230,9 +243,11 @@ class SAC_Meta_Learner:
         entropy_loss = -1 * torch.mean(torch.mean(self.networks.log_entropy_coeff * branched_ent_sums, axis=1), axis=0)
         return entropy_loss
 
-    def calc_losses(self, batch: SACBuffer, gamma):
-        observations = torch_from_np(batch.observations, self.device)
-        next_observations = torch_from_np(batch.next_observations, self.device)
+    def calc_losses(self, batch: SACBuffer, hyperparameters: {}):
+        losses = {}
+        gamma = hyperparameters['gamma']
+        observations = torch_from_np(batch.observations, self.device).to(dtype=torch.float32)
+        next_observations = torch_from_np(batch.next_observations, self.device).to(dtype=torch.float32)
         rewards = torch_from_np(batch.rewards, self.device)
         dones = torch_from_np(batch.done, self.device)
 
@@ -262,11 +277,27 @@ class SAC_Meta_Learner:
         policy_loss = self.calc_policy_loss(all_log_probs, q1_policy_out, batch.action_space)
 
         entropy_loss = self.calc_entropy_loss(all_log_probs, batch.action_space)
-        q1_loss, q2_loss = self.calc_q_loss(condensed_q1, condensed_q2, target_values, dones, rewards, gamma=gamma)
+        q1_loss, q2_loss = self.calc_q_loss(condensed_q1, condensed_q2, target_values, dones, rewards[:, 0], gamma=gamma)
 
         # Update the target network
 
-        return policy_loss, value_loss, entropy_loss, q1_loss, q2_loss
+        total_value_loss = value_loss + q1_loss + q2_loss
+
+        losses['Policy Loss'] = policy_loss.item()
+        losses['Value Loss'] = value_loss.item()
+        losses['Entropy Loss'] = entropy_loss.item()
+        losses['Q1 Loss'] = q1_loss.item()
+        losses['Q2 Loss'] = q2_loss.item()
+
+        curiosity_loss = None
+        if self.enable_curiosity:
+            f_loss, i_loss = self.curiosity.calc_loss_ppo_sac(batch)
+            curiosity_loss = 1 / hyperparameters['curiosity_lambda'] * (
+                    hyperparameters['curiosity_beta'] * f_loss + (1 - hyperparameters['curiosity_beta']) * i_loss)
+            losses['Curiosity Forward Loss'] = f_loss.item()
+            losses['Curiosity Inverse Loss'] = i_loss.item()
+
+        return policy_loss, total_value_loss, entropy_loss, losses, curiosity_loss
 
     def generate_trajectories_and_fill_buffer(self, buffer, time_horizon) -> {}:
         env = self.env
@@ -278,10 +309,9 @@ class SAC_Meta_Learner:
         episode_lengths = []
         cumulative_rewards = []
 
-        appended_steps = 0
-
         first_iteration = True
         buffer_finished = False
+        appended_steps = 0
 
         if len(buffer) > 0:
             buffer.remove_old_obs(remove_percentage=0.2)
@@ -308,7 +338,7 @@ class SAC_Meta_Learner:
                             'obs_buf': np.zeros([time_horizon, self.obs_space], dtype=np.float32),
                             'n_obs_buf': np.zeros([time_horizon, self.obs_space], dtype=np.float32),
                             'acts_buf': np.zeros([time_horizon, len(self.action_space)], dtype=np.float32),
-                            'rews_buf': np.zeros([time_horizon], dtype=np.float32),
+                            'rews_buf': np.zeros([time_horizon, 2], dtype=np.float32),
                             'done_buf': np.zeros([time_horizon], dtype=np.float32)}
 
                     for agent_id_decisions in decision_steps:
@@ -353,7 +383,7 @@ class SAC_Meta_Learner:
                 current_added_reward[agent_id] += reward
 
                 # Store trajectory of every Agent {Agent0:[obs,act,rew,n_obs,done,obs,act,rew,n_obs,done,.... Agent1: ....}
-                transitions[agent_id]['rews_buf'][agent_ptr[agent_id]] = reward
+                transitions[agent_id]['rews_buf'][agent_ptr[agent_id], 0] = reward
                 transitions[agent_id]['n_obs_buf'][agent_ptr[agent_id]] = next_obs
                 transitions[agent_id]['done_buf'][agent_ptr[agent_id]] = done
 
@@ -375,8 +405,7 @@ class SAC_Meta_Learner:
                             next_obs_tmp = np.array(next_obs)
                             next_obs_tensor = torch_from_np(next_obs_tmp, device=self.device)
                             value_estimate = self.policy.critic(next_obs_tensor).detach().cpu().numpy()
-                            transitions[agent_id]['rews_buf'][agent_ptr[agent_id]] = value_estimate
-
+                            transitions[agent_id]['rews_buf'][agent_ptr[agent_id], 0] = value_estimate
 
                     if done:
                         episode_lengths.append(agent_current_step[agent_id])
@@ -385,40 +414,24 @@ class SAC_Meta_Learner:
                         current_added_reward[agent_id] = 0
 
                     trajectory_lengths.append(agent_ptr[agent_id] + 1)
-
-                    for i in range(agent_ptr[agent_id] + 1):
-                        # Store all experiences of the agent in the buffer
-                        appended_steps += 1
-
-                        if buffer.observations is None:
-                            buffer.observations = transitions[agent_id]['obs_buf'][i]
-                            buffer.actions = transitions[agent_id]['acts_buf'][i]
-                            buffer.rewards = transitions[agent_id]['rews_buf'][i]
-                            buffer.next_observations = transitions[agent_id]['n_obs_buf'][i]
-                            buffer.done = transitions[agent_id]['done_buf'][i]
-                        else:
-                            buffer.observations = np.vstack((buffer.observations, transitions[agent_id]['obs_buf'][i]))
-                            buffer.actions = np.vstack((buffer.actions, transitions[agent_id]['acts_buf'][i]))
-                            buffer.rewards = np.append(buffer.rewards, transitions[agent_id]['rews_buf'][i])
-                            buffer.next_observations = np.vstack(
-                                (buffer.next_observations, transitions[agent_id]['n_obs_buf'][i]))
-                            buffer.done = np.append(buffer.done, transitions[agent_id]['done_buf'][i])
-
-                    if len(buffer) >= buffer.max_buffer_size:
-                        length_counter = len(buffer) - buffer.max_buffer_size
-                        buffer.observations = buffer.observations[length_counter:]
-                        buffer.rewards = buffer.rewards[length_counter:]
-                        buffer.actions = buffer.actions[length_counter:]
-                        buffer.next_observations = buffer.next_observations[length_counter:]
-                        buffer.done = buffer.done[length_counter:]
+                    if agent_ptr[agent_id] + 1 + len(buffer) > buffer.max_buffer_size:
                         buffer_finished = True
                         break
+
+                    appended_steps += len(transitions[agent_id]['done_buf'][:agent_ptr[agent_id] + 1])
+
+                    buffer.store(transitions[agent_id]['obs_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['acts_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['n_obs_buf'][:agent_ptr[agent_id] + 1],
+                                 transitions[agent_id]['done_buf'][:agent_ptr[agent_id] + 1])
+
 
                     transitions[agent_id]['obs_buf'] = np.zeros(
                         [time_horizon, self.obs_space], dtype=np.float32)
                     transitions[agent_id]['acts_buf'] = np.zeros([time_horizon, len(self.action_space)],
                                                                  dtype=np.float32)
-                    transitions[agent_id]['rews_buf'] = np.zeros([time_horizon],
+                    transitions[agent_id]['rews_buf'] = np.zeros([time_horizon, 2],
                                                                  dtype=np.float32)
                     transitions[agent_id]['n_obs_buf'] = np.zeros(
                         [time_horizon, self.obs_space], dtype=np.float32)
@@ -452,7 +465,7 @@ class SAC_Meta_Learner:
                                     {r'\meta_step_' + str(self.meta_step): np.mean(cumulative_rewards)}, self.step)
             self.writer.add_scalars('task_' + str(self.task) + r'\SAC Mean Episode Length',
                                     {r'\meta_step_' + str(self.meta_step): np.mean(episode_lengths)}, self.step)
-        return buffer, appended_steps, np.mean(cumulative_rewards), np.mean(trajectory_lengths)
+        return buffer,appended_steps, np.mean(cumulative_rewards), np.mean(trajectory_lengths)
 
     def close_env(self):
         self.env.close()
@@ -461,7 +474,6 @@ class SAC_Meta_Learner:
         max_steps = hyperparameters['max_steps']
         batch_size = hyperparameters['batch_size']
         time_horizon = hyperparameters['time_horizon']
-        gamma = hyperparameters['gamma']
         buffer_size = hyperparameters['buffer_size']
 
         steps_per_update = hyperparameters['steps_per_update']
@@ -469,65 +481,70 @@ class SAC_Meta_Learner:
 
         print("Started SAC training with {} steps to take".format(hyperparameters['max_steps']))
 
-        replay_buffer = SACBuffer(max_buffer_size=buffer_size, action_space=self.action_space)
+        replay_buffer = SACBuffer(max_buffer_size=buffer_size, obs_space=self.obs_space, action_space=self.action_space)
 
         mean_rewards = []
         mean_episode_lengths = []
         self.step = 0
 
         while self.step < max_steps:
-            buffer, steps_taken, mean_reward, mean_episode_length = self.generate_trajectories_and_fill_buffer(buffer=replay_buffer, time_horizon=time_horizon)
+            buffer, steps_taken, mean_reward, mean_episode_length = self.generate_trajectories_and_fill_buffer(
+                buffer=replay_buffer, time_horizon=time_horizon)
+            print("Buffer filled, {} steps taken".format(steps_taken))
             mean_rewards.append(mean_reward)
             mean_episode_lengths.append(mean_episode_length)
 
             self.step += steps_taken
             update_steps = 0
             frame_start = time.time()
-            value_losses = []
-            policy_losses = []
-            entropy_losses = []
-            q1_losses = []
-            q2_losses = []
+            value_losses, policy_losses, entropy_losses, q1_losses, q2_losses = [], [], [], [], []
             while update_steps * steps_per_update < steps_taken:
                 batch = buffer.sample_batch(batch_size=batch_size)
-                p_loss, v_loss, e_loss, q1_loss, q2_loss = self.calc_losses(batch, gamma)
-                value_losses.append(v_loss.item())
-                policy_losses.append(p_loss.item())
-                entropy_losses.append(e_loss.item())
-                q1_losses.append(q1_loss.item())
-                q2_losses.append(q2_loss.item())
-                total_value_loss = q1_loss + q2_loss + v_loss
+                p_loss, total_v_loss, e_loss,losses, curiosity_loss = self.calc_losses(batch, hyperparameters)
+                value_losses.append(losses['Value Loss'])
+                policy_losses.append(losses['Policy Loss'])
+                entropy_losses.append(losses['Entropy Loss'])
+                q1_losses.append(losses['Q1 Loss'])
+                q2_losses.append(losses['Q2 Loss'])
 
                 self.policy_optimizer.zero_grad()
                 self.value_optimizer.zero_grad()
-                self.entropy_optimizer.zero_grad()
+                if hyperparameters['adaptive_coeff']:
+                    self.entropy_optimizer.zero_grad()
+                    e_loss.backward()
+                    self.entropy_optimizer.step()
 
                 p_loss.backward()
-                total_value_loss.backward()
-                e_loss.backward()
+                total_v_loss.backward()
 
                 torch.nn.utils.clip_grad_norm_(self.all_parameters, 10.0)
 
                 self.policy_optimizer.step()
                 self.value_optimizer.step()
-                self.entropy_optimizer.step()
+
+                # for network in self.get_networks_and_parameters()['networks']:
+                #     for param in network.parameters():
+                #         print("Parameter2: ")
+                #         print(param)
 
                 if (hyperparameters['decay_lr']):
-                    self.learning_rate_scheduler_e.step(epoch=self.step)
                     self.learning_rate_scheduler_p.step(epoch=self.step)
                     self.learning_rate_scheduler_v.step(epoch=self.step)
+                    if hyperparameters['adaptive_coeff']:
+                        self.learning_rate_scheduler_e.step(epoch=self.step)
 
-                self.networks.soft_update(self.networks.policy_network.critic,
-                                                self.networks.target_network, tau=tau)
+                if update_steps % 10 == 0:
+                    self.networks.soft_update(self.networks.policy_network.critic,
+                                              self.networks.target_network, tau=tau)
 
                 update_steps += 1
 
             self.writer.add_scalars('task_' + str(self.task) + r"\SAC Entropy Loss",
-                                    {r'\meta_step_'+str(self.meta_step): np.mean(entropy_losses)}, self.step)
+                                    {r'\meta_step_' + str(self.meta_step): np.mean(entropy_losses)}, self.step)
             self.writer.add_scalars('task_' + str(self.task) + r'\SAC Policy Loss',
-                                   {r'\meta_step_' + str(self.meta_step) : np.mean(policy_losses)}, self.step)
+                                    {r'\meta_step_' + str(self.meta_step): np.mean(policy_losses)}, self.step)
             self.writer.add_scalars('task_' + str(self.task) + r'\SAC Value Loss',
-                                   {r'\meta_step_' + str(self.meta_step) : np.mean(value_losses)}, self.step)
+                                    {r'\meta_step_' + str(self.meta_step): np.mean(value_losses)}, self.step)
             self.writer.add_scalars('task_' + str(self.task) + r'\SAC Q1 Loss',
                                     {r'\meta_step_' + str(self.meta_step): np.mean(q1_losses)}, self.step)
             self.writer.add_scalars('task_' + str(self.task) + r'\SAC Q2 Loss',
@@ -538,47 +555,48 @@ class SAC_Meta_Learner:
 
         return np.mean(mean_rewards), np.mean(mean_episode_lengths)
 
+
 if __name__ == '__main__':
 
-    run_id = "results/sac_1"
+    run_id = "results/sac_0"
     writer = SummaryWriter(run_id)
-
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if device == 'cuda':
         print(torch.cuda.get_device_name(0))
         print('Memory Usage:')
-        print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
-        print('Cached:   ', round(torch.cuda.memory_cached(0)/1024**3,1), 'GB')
+        print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
+        print('Cached:   ', round(torch.cuda.memory_cached(0) / 1024 ** 3, 1), 'GB')
 
     sac_module = SAC_Meta_Learner(device, writer=writer)
 
-    env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=2, target_z=2)
+    env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
+                         agent_x=0, agent_z=0, target_x=2, target_z=2)
 
     ########################## Hyperparameters for train Run ############################
     #####################################################################################
 
-    training_parameters = {}
+    training_parameters = sac_module.get_default_hyperparameters()
 
     training_parameters['Algorithm'] = "SAC"
+    training_parameters['enable_curiosity'] = True
     training_parameters['run_id'] = run_id
 
-
     training_parameters['max_steps'] = 1000000
-    training_parameters['buffer_size'] = 2000 # Replay buffer size
-    training_parameters['learning_rate'] = 0.0001 # Typical range: 0.00001 - 0.001
-    training_parameters['batch_size'] = 512 # Typical range: 32-512
+    training_parameters['buffer_size'] = 20000  # Replay buffer size
+    training_parameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
+    training_parameters['batch_size'] = 512  # Typical range: 32-512
     training_parameters['hidden_layers'] = 2
     training_parameters['layer_size'] = 256
-    training_parameters['time_horizon'] = 64
+    training_parameters['time_horizon'] = 256
     training_parameters['gamma'] = 0.99
     training_parameters['decay_lr'] = True
 
-
-    training_parameters['init_coeff'] = 0.5 # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
-    training_parameters['tau'] = 0.005 # Typical range: 0.005 - 0.01 decrease for stability
-    training_parameters['steps_per_update'] = 1 # Typical range: 1 - 20 -> Equal to number of agents in scene
-    training_parameters['adaptive_coeff'] = True # Whether entropy coeff should be learned
+    training_parameters[
+        'init_coeff'] = 0.5  # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
+    training_parameters['tau'] = 0.005  # Typical range: 0.005 - 0.01 decrease for stability
+    training_parameters['steps_per_update'] = 1  # Typical range: 1 - 20 -> Equal to number of agents in scene
+    training_parameters['adaptive_coeff'] = True  # Whether entropy coeff should be learned
 
     writer.add_text("training_parameters", str(training_parameters))
     print("Started run with following hyperparameters:")
@@ -589,5 +607,3 @@ if __name__ == '__main__':
 
     sac_module.init_networks_and_optimizers(training_parameters)
     sac_module.train(training_parameters)
-
-

@@ -40,6 +40,8 @@ class Rainbow_Meta_Learner:
     def get_default_hyperparameters(self):
         hyperparameters = {}
         hyperparameters['Algorithm'] = "RAINBOW"
+        hyperparameters['enable_curiosity'] = True
+
 
         hyperparameters['max_steps'] = 1000000
         hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
@@ -122,7 +124,7 @@ class Rainbow_Meta_Learner:
 
         print("Space detected successfully.")
         print("Observation space detected as {}\nAction space detected as: {}".format(result, branches))
-        print("For DQN, Action space gets reshaped to: {}".format(str(action_space)))
+        print("For Rainbow the Action space gets reshaped to: {}".format(str(action_space)))
 
         self.env.reset()
 
@@ -441,7 +443,7 @@ class Rainbow_Meta_Learner:
 
 if __name__ == '__main__':
 
-    run_id = "results/dqn_1"
+    run_id = "results/dqn_0"
 
     writer = SummaryWriter(run_id)
 
@@ -457,10 +459,12 @@ if __name__ == '__main__':
     env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=2, target_z=2)
 
     ############ Hyperparameters DQN ##############
-    training_parameters = {}
+    training_parameters = dqn_module.get_default_hyperparameters()
 
     training_parameters['Algorithm'] = "RAINBOW"
     training_parameters['run_id'] = run_id
+    training_parameters['enable_curiosity'] = True
+
 
     training_parameters['max_steps'] = 1000000
     training_parameters['buffer_size'] = 5000 # Replay buffer size
@@ -471,7 +475,6 @@ if __name__ == '__main__':
     training_parameters['time_horizon'] = 64
     training_parameters['gamma'] = 0.99
     training_parameters['decay_lr'] = True
-
 
     ### DQN specific
 
