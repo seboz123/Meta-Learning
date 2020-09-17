@@ -213,6 +213,11 @@ class PPO_Meta_Learner:
                         next_action = [action_branch.detach().cpu().numpy() for action_branch in action_torch]
                         actions[agent_id] = action
 
+                    # Check if this makes a difference
+                    if agent_ptr[agent_id] == time_horizon - 1:
+                        transitions[agent_id]['rews_buf'][agent_ptr[agent_id]] += self.policy.policy.critic_pass(
+                            torch_from_np(transitions[agent_id]['obs'][agent_ptr[agent_id]], self.device)).detach().cpu().cumpy()
+
                     transitions[agent_id]['act_log_prob_buf'][agent_ptr[agent_id]] = action_log_probs
                     transitions[agent_id]['entropies_buf'][agent_ptr[agent_id]] = entropies
 
@@ -238,26 +243,27 @@ class PPO_Meta_Learner:
                     else:
                         transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1, 1] = np.zeros_like(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1, 1])
 
-                    # Compute Value estimates
+                    # Compute Value estimates and GAE
                     observations = torch_from_np(transitions[agent_id]['obs_buf'][:agent_ptr[agent_id] + 1], self.device)
                     values = self.policy.policy.critic_pass(observations)
                     returns = []
                     advantages = []
                     value_estimates = np.zeros((agent_ptr[agent_id] + 1, 2))
                     for i, value_signal in enumerate(values):
-                        local_value_estimate = value_signal.detach().cpu().numpy().squeeze(-1)
+                        local_value_estimate = value_signal.detach().cpu().numpy()
                         value_estimates[:, i] = local_value_estimate
                         local_reward = transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1, i]
-                        local_advantage =  self.get_gae(rewards=local_reward,value_estimates=local_value_estimate,gamma=hyperparameters['gamma'],lambd=hyperparameters['lambd'])
+                        local_advantage = self.get_gae(rewards=local_reward,value_estimates=local_value_estimate,gamma=hyperparameters['gamma'],lambd=hyperparameters['lambd'])
                         local_return = local_advantage + local_value_estimate
                         returns.append(local_return)
                         advantages.append(local_advantage)
 
+                    advantages_reshaped = np.stack(advantages, axis=-1)
+                    returns_reshaped = np.stack(returns, axis=-1)
 
                     global_advantages = np.mean(advantages, axis=0)
                     global_returns = np.mean(returns, axis=0)
 
-                    print(len(transitions[agent_id]['n_obs_buf'][:agent_ptr[agent_id] + 1]))
                     buffer.store(obs=transitions[agent_id]['obs_buf'][:agent_ptr[agent_id] + 1],
                                  acts=transitions[agent_id]['acts_buf'][:agent_ptr[agent_id] + 1],
                                  rews=transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1],
@@ -265,7 +271,7 @@ class PPO_Meta_Learner:
                                  done=transitions[agent_id]['done_buf'][:agent_ptr[agent_id] + 1],
                                  entropies=transitions[agent_id]['entropies_buf'][:agent_ptr[agent_id] + 1],
                                  act_log_probs=transitions[agent_id]['act_log_prob_buf'][:agent_ptr[agent_id] + 1],
-                                 value_estimates=value_estimates, returns=returns, advantages=advantages,
+                                 value_estimates=value_estimates, returns=returns_reshaped, advantages=advantages_reshaped,
                                  global_returns=global_returns, global_advantages=global_advantages)
 
                     buffer_length += agent_ptr[agent_id] + 1
@@ -286,6 +292,8 @@ class PPO_Meta_Learner:
                     transitions[agent_id]['entropies_buf'] = np.zeros(
                         [time_horizon, len(self.action_space)],
                         dtype=np.float32)
+
+                    agent_ptr[agent_id] = 0
 
                 else:  # If the corresponding agent is not done, continue
                     agent_ptr[agent_id] += 1
@@ -361,35 +369,34 @@ class PPO_Meta_Learner:
             torch.FloatTensor, torch.FloatTensor, torch.FloatTensor):
         obs = torch_from_np(obs, self.device).to(dtype=torch.float32)
         acts = torch_from_np(acts, self.device)
-        dists, value_estimates, actions, curiosity_values = self.policy.policy(obs)
+        dists, actions = self.policy.policy(obs)
+        values = self.policy.policy.critic_pass(obs)
+
         cumulated_log_probs, entropies, all_log_probs = get_probs_and_entropies(acts, dists, self.device)  # Error here
-        out_value = []
-        if self.enable_curiosity:
-            for value, curiosity_value in zip(value_estimates, curiosity_values):
-                out_value.append(value)
-                out_value.append(curiosity_value)
-            values = torch.stack(out_value).view(-1, 2)
-        else:
-            values = value_estimates
+
         return cumulated_log_probs, entropies, values, dists, actions
 
     def calc_value_loss(self, values: torch.FloatTensor, old_values: torch.FloatTensor,returns: torch.FloatTensor,
                         eps) -> torch.FloatTensor:
         old_values = old_values
         returns = returns
-        clipped_value_est = old_values[:, 0] + torch.clamp(values[:, 0] - old_values[:, 0], -eps, eps)
-        tmp_loss_1 = (returns[:, 0] - values[:, 0])**2
-        tmp_loss_2 = (returns[:, 0] - clipped_value_est)**2
-        value_loss = torch.mean(torch.max(tmp_loss_1, tmp_loss_2))
-        curiosity_value_loss = None
 
+        value_losses = []
         if self.enable_curiosity:
-            clipped_value_est = old_values[:, 1] + torch.clamp(values[:, 1] - old_values[:, 1], -1 * eps, eps)
-            tmp_loss_1 = torch.pow(returns[:, 1] - values[:, 1], 2)
-            tmp_loss_2 = torch.pow(returns[:, 1] - clipped_value_est, 2)
-            curiosity_value_loss = torch.max(tmp_loss_1, tmp_loss_2)
+            for value_signal in values:
+                clipped_value_est = old_values[:, 0] + torch.clamp(value_signal - old_values[:, 0], -eps, eps)
+                tmp_loss_1 = (returns[:, 0] - value_signal)**2
+                tmp_loss_2 = (returns[:, 0] - clipped_value_est)**2
+                value_loss = torch.mean(torch.max(tmp_loss_1, tmp_loss_2))
+                value_losses.append(value_loss)
+        else:
+            clipped_value_est = old_values[:, 0] + torch.clamp(values[0] - old_values[:, 0], -eps, eps)
+            tmp_loss_1 = (returns[:, 0] - values[0])**2
+            tmp_loss_2 = (returns[:, 0] - clipped_value_est)**2
+            value_loss = torch.mean(torch.max(tmp_loss_1, tmp_loss_2))
+            value_losses.append(value_loss)
 
-        return value_loss, curiosity_value_loss
+        return value_losses
 
     def calc_policy_loss(self, advantages: torch.FloatTensor, log_probs: torch.FloatTensor,
                          old_log_probs: torch.FloatTensor, eps: float = 0.2) -> torch.FloatTensor:
@@ -405,7 +412,7 @@ class PPO_Meta_Learner:
         obs = buffer.observations
         acts = buffer.actions
         values = buffer.values
-        advantages = buffer.advantages[:, 0]
+        advantages = buffer.global_advantages
         returns = buffer.returns
 
         old_values = torch_from_np(values, self.device)
@@ -415,13 +422,12 @@ class PPO_Meta_Learner:
 
         log_probs, entropies, values, dists, actions = self.evaluate_actions(obs, acts)
 
-        value_loss, curiosity_value_loss = self.calc_value_loss(values, old_values, returns, eps=epsilon)
+        value_losses = self.calc_value_loss(values, old_values, returns, eps=epsilon)
         if self.enable_curiosity:
-            total_loss_stacked = [value_loss, curiosity_value_loss]
-            total_value_loss = torch.mean(torch.stack(total_loss_stacked))
+            # print(value_losses[0], value_losses[1])
+            total_value_loss = torch.mean(torch.stack(value_losses))
         else:
-            total_value_loss = value_loss
-        print(total_value_loss)
+            total_value_loss = value_losses[0]
 
         policy_loss = self.calc_policy_loss(advantages, log_probs, old_log_probs, eps=epsilon)
         entropy = entropies.mean()
@@ -472,18 +478,18 @@ class PPO_Meta_Learner:
 
             epsilon = max(hyperparameters['epsilon'] * (1 - self.step/max_steps), 0.1)
             beta = max(hyperparameters['beta'] * (1 - self.step/max_steps), 1e-5)
+            learning_rate = max(hyperparameters['learning_rate'] * (1 - self.step/max_steps), 1e-6)
 
-
-            for parameter_group in self.optimizer.param_groups:
-                print("Current PPO Training learning rate: {:.6f}".format(parameter_group['lr']))
+            for param in self.optimizer.param_groups:
+                param['lr'] = learning_rate
 
             buffer = PPOBuffer(buffer_size=buffer_size, obs_size=self.obs_space, action_space=self.action_space)
             mean_reward, mean_episode_length = self.generate_and_fill_buffer(hyperparameters=hyperparameters, buffer=buffer)
 
-            print("Generated Buffer:")
-            np.set_printoptions(suppress=True, threshold=np.inf)
-            print(buffer.returns.shape)
-            print(buffer.rewards.shape)
+            # print("Generated Buffer:")
+            # np.set_printoptions(suppress=True, threshold=np.inf)
+            # print(buffer.returns.shape)
+            # print(buffer.rewards.shape)
 
             mean_rewards.append(mean_reward)
             mean_episode_lengths.append(mean_episode_length)
@@ -514,9 +520,9 @@ class PPO_Meta_Learner:
                     # Gradient clipping
                     torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5.0)
                     self.optimizer.step()
-
-            if(hyperparameters['decay_lr']):
-                self.learning_rate_scheduler.step(epoch=self.step)
+            #
+            # if(hyperparameters['decay_lr']):
+            #     self.learning_rate_scheduler.step(epoch=self.step)
 
             print("Total Loss: {}".format(np.mean(total_losses)))
             print("Value Loss: {}".format(np.mean(v_losses)))
@@ -586,7 +592,7 @@ if __name__ == '__main__':
 
     ppo_module = PPO_Meta_Learner(device, writer=writer, is_meta_learning=False)
 
-    env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
+    env = init_unity_env("mMaze.app", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
                          agent_x=0, agent_z=0, target_x=0, target_z=1, base_port=4500)
 
     training_parameters = ppo_module.get_default_hyperparameters()
@@ -595,7 +601,7 @@ if __name__ == '__main__':
     training_parameters['run_id'] = run_id
 
     training_parameters['max_steps'] = 5000000
-    training_parameters['buffer_size'] = 24000  # Replay buffer size
+    training_parameters['buffer_size'] = 30000  # Replay buffer size
     training_parameters['learning_rate'] = 0.0003  # Typical range: 0.00001 - 0.001
     training_parameters['batch_size'] = 1024  # Typical range: 32-512
     training_parameters['hidden_layers'] = 2

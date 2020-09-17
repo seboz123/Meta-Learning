@@ -84,7 +84,6 @@ class PPOBuffer:
               returns, advantages, global_returns, global_advantages):
 
         num_experiences = len(done)
-        print("Storing ", num_experiences)
         self.observations[self.ptr:self.ptr + num_experiences, :] = obs
         self.actions[self.ptr:self.ptr + num_experiences, :] = acts
         self.rewards[self.ptr:self.ptr + num_experiences, :] = rews
@@ -94,9 +93,8 @@ class PPOBuffer:
         self.act_log_probs[self.ptr:self.ptr + num_experiences, :] = act_log_probs
 
         self.values[self.ptr:self.ptr + num_experiences, :] = value_estimates
-        for i, (advantage, return_array) in enumerate(zip(advantages, returns)):
-            self.advantages[self.ptr:self.ptr + num_experiences, i] = advantage
-            self.returns[self.ptr:self.ptr + num_experiences, i] = return_array
+        self.advantages[self.ptr:self.ptr + num_experiences, :] = advantages
+        self.returns[self.ptr:self.ptr + num_experiences, :] = returns
 
         self.global_returns[self.ptr:self.ptr + num_experiences] = global_returns
         self.global_advantages[self.ptr:self.ptr + num_experiences] = global_advantages
@@ -110,14 +108,20 @@ class PPOBuffer:
 
         observations = self.observations[indx]
         actions = self.actions[indx]
-        rewards = self.rewards[indx]
         next_observations = self.next_observations[indx]
         done = self.done[indx]
-        values = self.values[indx]
         entropies = self.entropies[indx]
         act_log_probs = self.act_log_probs[indx]
-        returns = self.returns[indx]
+
+
+        rewards = self.rewards[indx]
+        values = self.values[indx]
         advantages = self.advantages[indx]
+        returns = self.returns[indx]
+
+        global_advantages = self.global_advantages[indx]
+        global_returns = self.global_returns[indx]
+
 
         batches = []
         for size in range(0, len(self), batch_size):
@@ -126,9 +130,10 @@ class PPOBuffer:
                 batch.store(obs=observations[size: size + batch_size],
                             acts=actions[size: size + batch_size], rews=rewards[size: size + batch_size],
                             n_obs=next_observations[size: size + batch_size], done=done[size: size + batch_size],
-                            values=values[size: size + batch_size], advantages=advantages[size: size + batch_size],
-                            act_log_probs=act_log_probs[size: size + batch_size],
-                            entropies=entropies[size: size + batch_size], returns=returns[size: size + batch_size])
+                            advantages=advantages[size: size + batch_size], value_estimates=values[size: size + batch_size],
+                            act_log_probs=act_log_probs[size: size + batch_size], returns=returns[size: size + batch_size],
+                            global_advantages=global_advantages[size: size + batch_size], global_returns=global_returns[size: size + batch_size],
+                            entropies=entropies[size: size + batch_size])
             else:
                 batch = PPOBuffer(len(self) - size, action_space=self.action_space, obs_size=self.obs_space)
                 batch.store(obs=observations[size:],
@@ -136,10 +141,12 @@ class PPOBuffer:
                             rews=rewards[size:],
                             n_obs=next_observations[size:],
                             done=done[size:],
-                            values=values[size:],
                             advantages=advantages[size:],
                             act_log_probs=act_log_probs[size:],
                             entropies=entropies[size:],
+                            value_estimates=values[size:],
+                            global_returns=global_returns[size:],
+                            global_advantages=global_advantages[size:],
                             returns=returns[size:])
 
             batches.append(batch)

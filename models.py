@@ -41,9 +41,9 @@ class ActorCriticPolicy(nn.Module):
 
         def critic_pass(self, obs: torch.Tensor):
             hidden = self.body(obs)
-            values = [self.value_out(hidden)]
+            values = [self.value_out(hidden).squeeze()]
             if self.enable_curiosity:
-                values.append(self.curiosity_value(hidden))
+                values.append(self.curiosity_value(hidden).squeeze())
             return values
 
     class Critic(nn.Module):
