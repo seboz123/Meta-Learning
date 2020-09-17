@@ -11,6 +11,7 @@ class ActorCriticPolicy(nn.Module):
     class SharedActorCritic(nn.Module):
         def __init__(self, state_dim, act_dim, hidden_size, num_hidden_layers, enable_curiosity: bool):
             nn.Module.__init__(self)
+            self.enable_curiosity = enable_curiosity
             body = [nn.Sequential(
                 nn.Linear(state_dim, hidden_size),
                 Swish())]
@@ -37,8 +38,11 @@ class ActorCriticPolicy(nn.Module):
                 dists.append(dist)
                 actions.append(dist.sample())
             value = self.value_out(hidden)
-            curiosity_value = self.curiosity_value(hidden)
-            return dists, value, actions, curiosity_value
+            if self.enable_curiosity:
+                curiosity_value = self.curiosity_value(hidden)
+                return dists, value, actions, curiosity_value
+            else:
+                return dists, value, actions, None
 
     class Critic(nn.Module):
         def __init__(self, state_dim, hidden_size, num_hidden_layers, enable_curiosity: bool):

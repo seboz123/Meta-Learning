@@ -34,7 +34,7 @@ class MetaLearner():
 
     def sample_task(self):
         task = init_unity_env('mMaze_r3/RLProject.exe', maze_seed=0, maze_rows=3, maze_cols=3, random_target=0,
-                              random_agent=0, agent_x=0, agent_z=0, target_x=0, target_z=2)
+                              random_agent=0, agent_x=0, agent_z=0, target_x=0, target_z=2, enable_heatmap=True)
         task_number = 0
 
         return task, task_number

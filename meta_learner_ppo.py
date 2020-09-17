@@ -157,7 +157,10 @@ class PPO_Meta_Learner:
                             action = [branch.detach().cpu().numpy() for branch in action_torch]
                             actions[agent_id_decisions] = action
                             value = value.detach().cpu().numpy()
-                            curiosity_value = curiosity_value.detach().cpu().numpy()
+                            if self.enable_curiosity:
+                                curiosity_value = curiosity_value.detach().cpu().numpy()
+                            else:
+                                curiosity_value = None
 
                         transitions[agent_id_decisions]['obs_buf'][agent_ptr[agent_id_decisions]] = init_state
                         transitions[agent_id_decisions]['acts_buf'][agent_ptr[agent_id_decisions]] = action
@@ -220,7 +223,10 @@ class PPO_Meta_Learner:
                         next_action = [action_branch.detach().cpu().numpy() for action_branch in action_torch]
                         actions[agent_id] = action
                         value = value.detach().cpu().numpy()
-                        curiosity_value = curiosity_value.detach().cpu().numpy()
+                        if self.enable_curiosity:
+                            curiosity_value = curiosity_value.detach().cpu().numpy()
+                        else:
+                            curiosity_value = None
 
                         if agent_ptr[agent_id] == time_horizon - 1:
                             transitions[agent_id]['rews_buf'][agent_ptr[agent_id], 0] = value
@@ -313,7 +319,10 @@ class PPO_Meta_Learner:
                         next_action = [action_branch.detach().cpu().numpy() for action_branch in action_torch]
                         actions[agent_id_decisions] = action
                         value = value.detach().cpu().numpy()
-                        curiosity_value = curiosity_value.detach().cpu().numpy()
+                        if self.enable_curiosity:
+                            curiosity_value = curiosity_value.detach().cpu().numpy()
+                        else:
+                            curiosity_value = None
 
                     transitions[agent_id]['entropies_buf'][agent_ptr[agent_id]] = entropies
                     transitions[agent_id]['acts_buf'][agent_ptr[agent_id]] = next_action
@@ -371,13 +380,16 @@ class PPO_Meta_Learner:
             torch.FloatTensor, torch.FloatTensor, torch.FloatTensor):
         obs = torch_from_np(obs, self.device).to(dtype=torch.float32)
         acts = torch_from_np(acts, self.device)
-        dists, values, actions, curiosity_values = self.policy.policy(obs)
+        dists, value_estimates, actions, curiosity_values = self.policy.policy(obs)
         cumulated_log_probs, entropies, all_log_probs = get_probs_and_entropies(acts, dists, self.device)  # Error here
         out_value = []
-        for value, curiosity_value in zip(values, curiosity_values):
-            out_value.append(value)
-            out_value.append(curiosity_value)
-        values = torch.stack(out_value).view(-1, 2)
+        if self.enable_curiosity:
+            for value, curiosity_value in zip(value_estimates, curiosity_values):
+                out_value.append(value)
+                out_value.append(curiosity_value)
+            values = torch.stack(out_value).view(-1, 2)
+        else:
+            values = value_estimates
         return cumulated_log_probs, entropies, values, dists, actions
 
     def calc_value_loss(self, values: torch.FloatTensor, old_values: torch.FloatTensor,returns: torch.FloatTensor,
@@ -396,7 +408,6 @@ class PPO_Meta_Learner:
             tmp_loss_2 = torch.pow(returns[:, 1] - clipped_value_est, 2)
             curiosity_value_loss = torch.max(tmp_loss_1, tmp_loss_2)
             value_losses.append(curiosity_value_loss)
-            value_loss = 0.5 * torch.mean(torch.stack(value_losses))
 
         return value_loss, curiosity_value_loss
 
@@ -426,29 +437,36 @@ class PPO_Meta_Learner:
 
         value_loss, curiosity_value_loss = self.calc_value_loss(values, old_values, returns, eps=epsilon)
 
+        if self.enable_curiosity:
+            total_value_loss = torch.mean(value_loss + curiosity_value_loss)
+        else:
+            total_value_loss = torch.mean(value_loss)
+
+
         policy_loss = self.calc_policy_loss(advantages, log_probs, old_log_probs, eps=epsilon)
         entropy = entropies.mean()
 
         kullback_leibler = 0.5 * torch.mean(torch.pow(log_probs - old_log_probs, 2))
         policy_loss = policy_loss
-        value_loss = 0.5 * value_loss
+        total_value_loss = 0.5 * total_value_loss
         entropy_loss = - beta * entropy
 
         losses['Policy Loss'] = policy_loss.item()
-        losses['Value Loss'] = value_loss.item()
+        losses['Value Loss'] = total_value_loss.item()
         losses['Entropy'] = entropy.item()
         losses['Approximate Kullback-Leibler'] = kullback_leibler.item()
 
-        loss = value_loss + policy_loss + entropy_loss
+        loss = total_value_loss + policy_loss + entropy_loss
 
         if self.enable_curiosity:
             f_loss, i_loss = self.curiosity.calc_loss_ppo_sac(buffer)
             curiosity_loss = 1 / hyperparameters['curiosity_lambda'] * (hyperparameters['curiosity_beta'] * f_loss + (1-hyperparameters['curiosity_beta']) * i_loss)
             losses['Curiosity Forward Loss'] = f_loss.item()
             losses['Curiosity Inverse Loss'] = i_loss.item()
+        else:
+            curiosity_loss = None
 
-
-        return loss,curiosity_loss, losses
+        return loss, curiosity_loss, losses
 
 
 
@@ -461,6 +479,7 @@ class PPO_Meta_Learner:
         batch_size = hyperparameters['batch_size']
         time_horizon = hyperparameters['time_horizon']
         buffer_size = hyperparameters['buffer_size']
+        buffer_size = 5000
 
         self.step = 0
         mean_rewards = []
@@ -494,7 +513,7 @@ class PPO_Meta_Learner:
                     v_losses.append(losses['Value Loss'])
                     entropies.append(losses['Entropy'])
                     kls.append(losses['Approximate Kullback-Leibler'])
-                    if hyperparameters['enable_curiosity']:
+                    if self.enable_curiosity:
                         curio_f_losses.append(losses['Curiosity Forward Loss'])
                         curio_i_losses.append(losses['Curiosity Inverse Loss'])
                         self.curiosity.optimizer.zero_grad()
@@ -512,15 +531,15 @@ class PPO_Meta_Learner:
                 self.learning_rate_scheduler.step(epoch=self.step)
 
             print("Total Loss: {}".format(np.mean(total_losses)))
-            print("Curiosity Forward Loss: {}".format(np.mean(curio_f_losses)))
-            print("Curiosity Inverse Loss: {}".format(np.mean(curio_i_losses)))
             print("Value Loss: {}".format(np.mean(v_losses)))
             print("Policy Loss: {}".format(np.mean(p_losses)))
             print("Entropy Loss: {}".format(np.mean(entropies)))
+            if self.enable_curiosity:
+                print("Curiosity Forward Loss: {}".format(np.mean(curio_f_losses)))
+                print("Curiosity Inverse Loss: {}".format(np.mean(curio_i_losses)))
 
 
-
-            if hyperparameters['enable_curiosity']:
+            if self.enable_curiosity:
                 self.writer.add_scalars('task_' + str(self.task) + r"\PPO Curiosity Forward Loss",
                                         {r'\meta_step_' + str(self.meta_step): np.mean(curio_f_losses)}, self.step)
                 self.writer.add_scalars('task_' + str(self.task) + r"\PPO Curiosity Inverse Loss",
@@ -554,7 +573,7 @@ if __name__ == '__main__':
     ppo_module = PPO_Meta_Learner(device, writer=writer)
 
     env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
-                         agent_x=0, agent_z=0, target_x=0, target_z=2)
+                         agent_x=0, agent_z=0, target_x=0, target_z=1)
 
     training_parameters = ppo_module.get_default_hyperparameters()
 
@@ -570,7 +589,7 @@ if __name__ == '__main__':
     training_parameters['time_horizon'] = 256
     training_parameters['gamma'] = 0.99
     training_parameters['decay_lr'] = True
-    training_parameters['enable_curiosity'] = True
+    training_parameters['enable_curiosity'] = False
 
     training_parameters['beta'] = 0.005 # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
     training_parameters['epsilon'] = 0.2 # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability

@@ -571,7 +571,7 @@ if __name__ == '__main__':
     sac_module = SAC_Meta_Learner(device, writer=writer)
 
     env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
-                         agent_x=0, agent_z=0, target_x=2, target_z=2)
+                         agent_x=0, agent_z=0, target_x=0, target_z=1)
 
     ########################## Hyperparameters for train Run ############################
     #####################################################################################
