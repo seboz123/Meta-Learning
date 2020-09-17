@@ -37,12 +37,14 @@ class ActorCriticPolicy(nn.Module):
                 dist = Categorical(action_probs)
                 dists.append(dist)
                 actions.append(dist.sample())
-            value = self.value_out(hidden)
+            return dists, actions
+
+        def critic_pass(self, obs: torch.Tensor):
+            hidden = self.body(obs)
+            values = [self.value_out(hidden)]
             if self.enable_curiosity:
-                curiosity_value = self.curiosity_value(hidden)
-                return dists, value, actions, curiosity_value
-            else:
-                return dists, value, actions, None
+                values.append(self.curiosity_value(hidden))
+            return values
 
     class Critic(nn.Module):
         def __init__(self, state_dim, hidden_size, num_hidden_layers, enable_curiosity: bool):

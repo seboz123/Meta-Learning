@@ -147,7 +147,7 @@ class ActionFlattener:
 
 
 def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int, random_agent: int, random_target: int,
-                   agent_x: int = 0, agent_z: int = 0, target_x: int = 1, target_z: int = 1, enable_heatmap: bool = True) -> UnityEnvironment:
+                   agent_x: int = 0, agent_z: int = 0, target_x: int = 1, target_z: int = 1, enable_heatmap: bool = True, base_port: int = 5000) -> UnityEnvironment:
 
     engine_configuration_channel = EngineConfigurationChannel()
     engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
@@ -165,7 +165,7 @@ def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int
 
 
     env = UnityEnvironment(file_name=env_path,
-                           base_port=5000, timeout_wait=120,
+                           base_port=base_port, timeout_wait=120,
                            no_graphics=False, seed=0,
                            side_channels=[engine_configuration_channel, env_parameters_channel])
 

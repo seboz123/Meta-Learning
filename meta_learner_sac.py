@@ -57,7 +57,8 @@ class SAC_Meta_Learner:
     def __init__(
             self,
             device: str,
-            writer: SummaryWriter = None,
+            writer: SummaryWriter,
+            is_meta_learning: bool
     ):
         self.device = device
         print("Using: " + str(self.device))
@@ -69,6 +70,7 @@ class SAC_Meta_Learner:
         self.action_space: Tuple
         self.enable_curiosity = False
         self.curiosity = None
+        self.is_meta_learning = is_meta_learning
 
     def get_default_hyperparameters(self):
         hyperparameters = {}
@@ -460,17 +462,30 @@ class SAC_Meta_Learner:
         if len(cumulative_rewards) > 0:
             print("Mean Cumulative Reward: {} at step {}".format(np.mean(cumulative_rewards), self.step))
             print("Mean Episode Length: {} at step {}".format(np.mean(trajectory_lengths), self.step))
+            if self.is_meta_learning:
+                self.writer.add_scalar(
+                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\Cumulative Reward",
+                    np.mean(cumulative_rewards), self.step)
+                self.writer.add_scalar(
+                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\Mean Episode Length",
+                    np.mean(episode_lengths), self.step)
+            else:
+                self.writer.add_scalar(
+                    "Environment/Cumulative Reward", np.mean(cumulative_rewards), self.step)
+                self.writer.add_scalar("Environment/Episode Length",
+                                       np.mean(episode_lengths), self.step)
 
-            self.writer.add_scalars('task_' + str(self.task) + r"\SAC Cumulative Reward",
-                                    {r'\meta_step_' + str(self.meta_step): np.mean(cumulative_rewards)}, self.step)
-            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Mean Episode Length',
-                                    {r'\meta_step_' + str(self.meta_step): np.mean(episode_lengths)}, self.step)
         return buffer,appended_steps, np.mean(cumulative_rewards), np.mean(trajectory_lengths)
 
     def close_env(self):
         self.env.close()
 
     def train(self, hyperparameters: dict):
+        self.writer.add_text("training_parameters", str(hyperparameters))
+        print("Started run with following hyperparameters:")
+        print("Started SAC training with {} steps to take".format(hyperparameters['max_steps']))
+        for key in hyperparameters:
+            print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
         max_steps = hyperparameters['max_steps']
         batch_size = hyperparameters['batch_size']
         time_horizon = hyperparameters['time_horizon']
@@ -479,7 +494,6 @@ class SAC_Meta_Learner:
         steps_per_update = hyperparameters['steps_per_update']
         tau = hyperparameters['tau']
 
-        print("Started SAC training with {} steps to take".format(hyperparameters['max_steps']))
 
         replay_buffer = SACBuffer(max_buffer_size=buffer_size, obs_space=self.obs_space, action_space=self.action_space)
 
@@ -539,17 +553,32 @@ class SAC_Meta_Learner:
 
                 update_steps += 1
 
-            self.writer.add_scalars('task_' + str(self.task) + r"\SAC Entropy Loss",
-                                    {r'\meta_step_' + str(self.meta_step): np.mean(entropy_losses)}, self.step)
-            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Policy Loss',
-                                    {r'\meta_step_' + str(self.meta_step): np.mean(policy_losses)}, self.step)
-            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Value Loss',
-                                    {r'\meta_step_' + str(self.meta_step): np.mean(value_losses)}, self.step)
-            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Q1 Loss',
-                                    {r'\meta_step_' + str(self.meta_step): np.mean(q1_losses)}, self.step)
-            self.writer.add_scalars('task_' + str(self.task) + r'\SAC Q2 Loss',
-                                    {r'\meta_step_' + str(self.meta_step): np.mean(q2_losses)}, self.step)
-
+            if self.is_meta_learning:
+                self.writer.add_scalar('Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Entropy Loss", np.mean(entropy_losses), self.step)
+                self.writer.add_scalar('Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Policy Loss", np.mean(policy_losses), self.step)
+                self.writer.add_scalar(
+                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Value Loss",
+                    np.mean(value_losses), self.step)
+                self.writer.add_scalar(
+                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Q1 Loss",
+                    np.mean(q1_losses), self.step)
+                self.writer.add_scalar(
+                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Q2 Loss",
+                    np.mean(q2_losses), self.step)
+            else:
+                self.writer.add_scalar("Losses/Entropy Loss",
+                    np.mean(entropy_losses), self.step)
+                self.writer.add_scalar("Losses/Policy Loss",
+                    np.mean(policy_losses), self.step)
+                self.writer.add_scalar(
+                    "Losses/Value Loss",
+                    np.mean(value_losses), self.step)
+                self.writer.add_scalar(
+                    "Losses/Q1 Loss",
+                    np.mean(q1_losses), self.step)
+                self.writer.add_scalar(
+                    "Losses/Q2 Loss",
+                    np.mean(q2_losses), self.step)
             frame_end = time.time()
             print("Current Update rate = {} updates per second".format(steps_taken / (frame_end - frame_start)))
 
@@ -568,10 +597,10 @@ if __name__ == '__main__':
         print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
         print('Cached:   ', round(torch.cuda.memory_cached(0) / 1024 ** 3, 1), 'GB')
 
-    sac_module = SAC_Meta_Learner(device, writer=writer)
+    sac_module = SAC_Meta_Learner(device, writer=writer, is_meta_learning=False)
 
     env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
-                         agent_x=0, agent_z=0, target_x=0, target_z=1)
+                         agent_x=0, agent_z=0, target_x=0, target_z=1, base_port=4000)
 
     ########################## Hyperparameters for train Run ############################
     #####################################################################################
@@ -597,11 +626,6 @@ if __name__ == '__main__':
     training_parameters['tau'] = 0.005  # Typical range: 0.005 - 0.01 decrease for stability
     training_parameters['steps_per_update'] = 1  # Typical range: 1 - 20 -> Equal to number of agents in scene
     training_parameters['adaptive_coeff'] = True  # Whether entropy coeff should be learned
-
-    writer.add_text("training_parameters", str(training_parameters))
-    print("Started run with following hyperparameters:")
-    for key in training_parameters:
-        print("{:<25s} {:<20s}".format(key, str(training_parameters[key])))
 
     sac_module.set_env_and_detect_spaces(env, task=0)
 

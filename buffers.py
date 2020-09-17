@@ -61,35 +61,46 @@ class PPOBuffer:
 
         self.observations = np.zeros((buffer_size, obs_size))
         self.actions = np.zeros((buffer_size, len(action_space)))
-        self.rewards = np.zeros((buffer_size, 2))
         self.next_observations = np.zeros((buffer_size, obs_size))
-        self.done = np.zeros((buffer_size))
-        self.values = np.zeros((buffer_size, 2))
+        self.done = np.zeros(buffer_size)
         self.entropies = np.zeros((buffer_size, len(action_space)))
         self.act_log_probs = np.zeros((buffer_size, len(action_space)))
+
+        self.rewards = np.zeros((buffer_size, 2))
+        self.values = np.zeros((buffer_size, 2))
         self.advantages = np.zeros((buffer_size, 2))
         self.returns = np.zeros((buffer_size, 2))
+
+        self.global_advantages = np.zeros(buffer_size)
+        self.global_returns = np.zeros(buffer_size)
 
     def __len__(self):
         return self.ptr
 
     def store(self, obs: np.ndarray, acts: np.ndarray, rews: np.ndarray,
-              n_obs: np.ndarray, done: np.ndarray, values: np.ndarray,
+              n_obs: np.ndarray, done: np.ndarray,
               entropies: np.ndarray,
-              act_log_probs: np.ndarray, advantages: np.ndarray,
-              returns: np.ndarray):
+              act_log_probs: np.ndarray, value_estimates,
+              returns, advantages, global_returns, global_advantages):
 
         num_experiences = len(done)
+        print("Storing ", num_experiences)
         self.observations[self.ptr:self.ptr + num_experiences, :] = obs
         self.actions[self.ptr:self.ptr + num_experiences, :] = acts
         self.rewards[self.ptr:self.ptr + num_experiences, :] = rews
         self.next_observations[self.ptr:self.ptr + num_experiences, :] = n_obs
         self.done[self.ptr:self.ptr + num_experiences] = done
-        self.values[self.ptr:self.ptr + num_experiences, :] = values
         self.entropies[self.ptr:self.ptr + num_experiences, :] = entropies
         self.act_log_probs[self.ptr:self.ptr + num_experiences, :] = act_log_probs
-        self.advantages[self.ptr:self.ptr + num_experiences, :] = advantages
-        self.returns[self.ptr:self.ptr + num_experiences, :] = returns
+
+        self.values[self.ptr:self.ptr + num_experiences, :] = value_estimates
+        for i, (advantage, return_array) in enumerate(zip(advantages, returns)):
+            self.advantages[self.ptr:self.ptr + num_experiences, i] = advantage
+            self.returns[self.ptr:self.ptr + num_experiences, i] = return_array
+
+        self.global_returns[self.ptr:self.ptr + num_experiences] = global_returns
+        self.global_advantages[self.ptr:self.ptr + num_experiences] = global_advantages
+
 
         self.ptr += num_experiences
 
