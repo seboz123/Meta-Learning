@@ -1,6 +1,7 @@
 import numpy as np
 import time
 from typing import Tuple
+from multiprocessing import Pool
 
 import torch
 import torch.nn as nn
@@ -26,12 +27,14 @@ class TorchNetworks:
         self.device = device
         self.discrete_target_entropy_scale = 0.2
         self.init_entropy_coeff = init_entropy_coeff
+        ### Actor Critic Policy Network ####
         self.policy_network = ActorCriticPolicy(obs_dim, act_dim, hyperparameters, False).to(device)  # Pi
-
-        self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers).to(
+        ### Value Network of Policy ######
+        ### Contains 2x Q-Networks ######
+        self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers, hyperparameters['enable_curiosity']).to(
             device)  # Q
-
-        self.target_network = ValueNetwork(obs_dim, 1, hidden_size, num_hidden_layers).to(device)  # V
+        ### Target Value Network ####
+        self.target_network = ValueNetwork(obs_dim, 1, hidden_size, num_hidden_layers, hyperparameters['enable_curiosity']).to(device)  # V
 
         self.soft_update(self.policy_network, self.target_network, 1.0)
         self.use_adaptive_entropy_coeff = adaptive_ent_coeff
@@ -76,9 +79,14 @@ class SAC_Meta_Learner:
         hyperparameters = {}
         hyperparameters['Algorithm'] = "SAC"
 
+        hyperparameters['logging_period'] = 2000
+
         hyperparameters['enable_curiosity'] = True
-        hyperparameters['curiosity_lambda'] = 0.1 # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
+        hyperparameters['curiosity_lambda'] = 10 # Weight factor of curiosity loss
         hyperparameters['curiosity_beta'] = 0.2 # Factor for using more of forward loss or more of inverse loss
+        hyperparameters['curiosity_enc_size'] = 32 # Encoding size of curiosity_module
+        hyperparameters['curiosity_layers'] = 2 # Layers of Curiosity Modules
+        hyperparameters['curiosity_units'] = 128 # Number of hidden units for curiosity modules
 
         hyperparameters['max_steps'] = 1000000
         hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
@@ -149,8 +157,8 @@ class SAC_Meta_Learner:
 
         if hyperparameters['enable_curiosity']:
             self.enable_curiosity = True
-            self.curiosity = CuriosityModule(obs_size=obs_dim, enc_size=64, hidden_layers=2, hidden_size=128,
-                                             learning_rate=0.003, device=self.device, action_shape=action_dim)
+            self.curiosity = CuriosityModule(obs_size=obs_dim, enc_size=hyperparameters['curiosity_enc_size'], hidden_layers=hyperparameters['curiosity_layers'],
+                                             hidden_size=hyperparameters['curiosity_units'], learning_rate=0.003, device=self.device, action_shape=action_dim)
             print("Enabled curiosity module")
 
     def get_networks_and_parameters(self) -> dict:
@@ -159,6 +167,10 @@ class SAC_Meta_Learner:
         networks_and_parameters['networks'].append(self.networks.value_network)
         networks_and_parameters['networks'].append(self.networks.policy_network)
         # networks_and_parameters['networks'].append(self.networks.target_network)
+        if self.enable_curiosity:
+            for network in self.curiosity.get_networks():
+                networks_and_parameters['networks'].append(network)
+
         networks_and_parameters['parameters'] = []
         if self.networks.use_adaptive_entropy_coeff:
             networks_and_parameters['parameters'].append(self.networks.log_entropy_coeff)
@@ -169,13 +181,34 @@ class SAC_Meta_Learner:
         return networks_and_parameters
 
     def calc_q_loss(self, q1_out, q2_out, target_values, dones, rewards, gamma):
-        q1_out = q1_out.squeeze()
-        q2_out = q2_out.squeeze()
-        target_values = target_values.squeeze()
-        with torch.no_grad():
-            q_backup = rewards + (1 - dones) * gamma * target_values
-        q1_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q1_out))
-        q2_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q2_out))
+        q1_losses = []
+        q2_losses = []
+        if self.enable_curiosity:
+            for i in range(2):
+                q1_out[i] = q1_out[i].squeeze()
+                q2_out[i] = q2_out[i].squeeze()
+            with torch.no_grad():
+                q_backup = rewards[:, i] + (1 - dones) * gamma * target_values[:, i]
+            q1_tmp = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q1_out[i]))
+            q2_tmp = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q2_out[i]))
+            q1_losses.append(q1_tmp)
+            q2_losses.append(q2_tmp)
+
+        else:
+            for i in range(1):
+                q1_out[i] = q1_out[i].squeeze()
+                q2_out[i] = q2_out[i].squeeze()
+            with torch.no_grad():
+                q_backup = rewards[:, i] + (1 - dones) * gamma * target_values[i]
+            q1_tmp = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q1_out[i]))
+            q2_tmp = 0.5 * torch.mean(torch.nn.functional.mse_loss(q_backup, q2_out[i]))
+            q1_losses.append(q1_tmp)
+            q2_losses.append(q2_tmp)
+        q1_loss = torch.mean(torch.stack(q1_losses))
+        q2_loss = torch.mean(torch.stack(q2_losses))
+
+
+
 
         return q1_loss, q2_loss
 
@@ -183,21 +216,25 @@ class SAC_Meta_Learner:
         with torch.no_grad():
             _ent_coeff = torch.exp(self.networks.log_entropy_coeff)
 
+        minimal_policy_qs = []
         action_probs = log_probs.exp()
-        _branched_q1_policy_out = break_into_branches(q1p_out * action_probs, action_space)
-        _branched_q2_policy_out = break_into_branches(q2p_out * action_probs, action_space)
+        for q1, q2, value in zip(q1p_out, q2p_out, values):
+            _branched_q1_policy_out = break_into_branches(q1 * action_probs, action_space)
+            _branched_q2_policy_out = break_into_branches(q2 * action_probs, action_space)
 
-        _q1_policy_mean = torch.mean(
-            torch.stack(
-                [torch.sum(_br, dim=1, keepdim=True) for _br in _branched_q1_policy_out]
+            _q1_policy_mean = torch.mean(
+                torch.stack(
+                    [torch.sum(_br, dim=1, keepdim=True) for _br in _branched_q1_policy_out]
+                )
             )
-        )
-        _q2_policy_mean = torch.mean(
-            torch.stack(
-                [torch.sum(_br, dim=1, keepdim=True) for _br in _branched_q2_policy_out]
+            _q2_policy_mean = torch.mean(
+                torch.stack(
+                    [torch.sum(_br, dim=1, keepdim=True) for _br in _branched_q2_policy_out]
+                )
             )
-        )
-        minimal_policy_qs = torch.min(_q1_policy_mean, _q2_policy_mean)
+            minimal_policy_qs.append(torch.min(_q1_policy_mean, _q2_policy_mean))
+
+        value_losses = []
         branched_per_action_ent = break_into_branches(log_probs * log_probs.exp(), action_space)
         branched_ent_bonus = torch.stack(
             [
@@ -205,17 +242,20 @@ class SAC_Meta_Learner:
                 for i, _lp in enumerate(branched_per_action_ent)
             ]
         )
-        with torch.no_grad():
-            v_backup = minimal_policy_qs - torch.mean(branched_ent_bonus, axis=0)
+        for value, minimal_qs in zip(values, minimal_policy_qs):
+            with torch.no_grad():
+                v_backup = minimal_qs - torch.mean(branched_ent_bonus, axis=0)
+                value_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(value.squeeze(), v_backup.squeeze()))
 
-        value_loss = 0.5 * torch.mean(torch.nn.functional.mse_loss(values.squeeze(), v_backup.squeeze()))
+                value_losses.append(value_loss)
 
+        value_loss = torch.mean(torch.stack(value_losses))
         return value_loss
 
     def calc_policy_loss(self, log_probs, q1p_out, action_space):
         _ent_coeff = torch.exp(self.networks.log_entropy_coeff)
 
-        mean_q1 = torch.mean(torch.stack(list(q1p_out)))
+        mean_q1 = torch.mean(torch.stack(list(q1p_out)), axis = 0)
 
         action_probs = torch.exp(log_probs)
 
@@ -255,6 +295,8 @@ class SAC_Meta_Learner:
 
         dists = self.policy.actor(observations)
         sampled_values = self.policy.critic(observations)
+
+
         actions = []
         for dist in dists:
             action = dist.sample()
@@ -266,12 +308,15 @@ class SAC_Meta_Learner:
             q1_policy_out, q2_policy_out = self.networks.value_network(observations)
 
         with torch.no_grad():
-            target_values = self.networks.target_network(next_observations)
+            target_values_tmp = self.networks.target_network(next_observations)
+            target_values = torch.stack(target_values_tmp, -1)
 
-        q1_out, q2_out = self.networks.value_network(observations)
+        q1_tmp, q2_tmp = self.networks.value_network(observations)
+        q1_out = torch.stack(q1_tmp, -1)
+        q2_out = torch.stack(q2_tmp, -1)
 
-        condensed_q1 = condense_q_stream(q1_out, actions, batch.action_space)
-        condensed_q2 = condense_q_stream(q2_out, actions, batch.action_space)
+        condensed_q1 = condense_q_stream(q1_out, actions, batch.action_space, hyperparameters['enable_curiosity'])
+        condensed_q2 = condense_q_stream(q2_out, actions, batch.action_space, hyperparameters['enable_curiosity'])
 
         value_loss = self.calc_value_loss(all_log_probs, sampled_values, q1_policy_out, q2_policy_out,
                                           batch.action_space)
@@ -279,7 +324,8 @@ class SAC_Meta_Learner:
         policy_loss = self.calc_policy_loss(all_log_probs, q1_policy_out, batch.action_space)
 
         entropy_loss = self.calc_entropy_loss(all_log_probs, batch.action_space)
-        q1_loss, q2_loss = self.calc_q_loss(condensed_q1, condensed_q2, target_values, dones, rewards[:, 0], gamma=gamma)
+
+        q1_loss, q2_loss = self.calc_q_loss(condensed_q1, condensed_q2, target_values, dones, rewards, gamma=gamma)
 
         # Update the target network
 
@@ -294,14 +340,14 @@ class SAC_Meta_Learner:
         curiosity_loss = None
         if self.enable_curiosity:
             f_loss, i_loss = self.curiosity.calc_loss_ppo_sac(batch)
-            curiosity_loss = 1 / hyperparameters['curiosity_lambda'] * (
+            curiosity_loss = hyperparameters['curiosity_lambda'] * (
                     hyperparameters['curiosity_beta'] * f_loss + (1 - hyperparameters['curiosity_beta']) * i_loss)
             losses['Curiosity Forward Loss'] = f_loss.item()
             losses['Curiosity Inverse Loss'] = i_loss.item()
 
         return policy_loss, total_value_loss, entropy_loss, losses, curiosity_loss
 
-    def generate_trajectories_and_fill_buffer(self, buffer, time_horizon) -> {}:
+    def generate_trajectories_and_fill_buffer(self, buffer, time_horizon: int = 512) -> {}:
         env = self.env
 
         # Create transition dict
@@ -382,14 +428,15 @@ class SAC_Meta_Learner:
                 next_obs = flatten(next_experiences[agent_id][0])  # Next_obs
                 done = next_experiences[agent_id][2]  # Done
 
-                current_added_reward[agent_id] += reward
 
                 # Store trajectory of every Agent {Agent0:[obs,act,rew,n_obs,done,obs,act,rew,n_obs,done,.... Agent1: ....}
                 transitions[agent_id]['rews_buf'][agent_ptr[agent_id], 0] = reward
                 transitions[agent_id]['n_obs_buf'][agent_ptr[agent_id]] = next_obs
                 transitions[agent_id]['done_buf'][agent_ptr[agent_id]] = done
 
+                current_added_reward[agent_id] += reward
                 agent_current_step[agent_id] += 1
+
                 if done or agent_ptr[agent_id] == time_horizon - 1:
                     # If the corresponding agent is done or trajectory is max length, get the next action
                     with torch.no_grad():
@@ -411,14 +458,19 @@ class SAC_Meta_Learner:
 
                     if done:
                         episode_lengths.append(agent_current_step[agent_id])
-                        agent_current_step[agent_id] = 0
                         cumulative_rewards.append(current_added_reward[agent_id])
                         current_added_reward[agent_id] = 0
+                        agent_current_step[agent_id] = 0
 
                     trajectory_lengths.append(agent_ptr[agent_id] + 1)
                     if agent_ptr[agent_id] + 1 + len(buffer) > buffer.max_buffer_size:
                         buffer_finished = True
                         break
+                    if self.enable_curiosity:
+                        transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1, 1] = self.curiosity.evaluate(obs=transitions[agent_id]['obs_buf'][:agent_ptr[agent_id] + 1],
+                                                acts=transitions[agent_id]['acts_buf'][:agent_ptr[agent_id] + 1],
+                                                next_obs=transitions[agent_id]['n_obs_buf'][:agent_ptr[agent_id] + 1])
+
 
                     appended_steps += len(transitions[agent_id]['done_buf'][:agent_ptr[agent_id] + 1])
 
@@ -464,10 +516,10 @@ class SAC_Meta_Learner:
             print("Mean Episode Length: {} at step {}".format(np.mean(trajectory_lengths), self.step))
             if self.is_meta_learning:
                 self.writer.add_scalar(
-                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\Cumulative Reward",
+                    'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/Cumulative Reward",
                     np.mean(cumulative_rewards), self.step)
                 self.writer.add_scalar(
-                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\Mean Episode Length",
+                    'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/Mean Episode Length",
                     np.mean(episode_lengths), self.step)
             else:
                 self.writer.add_scalar(
@@ -475,7 +527,7 @@ class SAC_Meta_Learner:
                 self.writer.add_scalar("Environment/Episode Length",
                                        np.mean(episode_lengths), self.step)
 
-        return buffer,appended_steps, np.mean(cumulative_rewards), np.mean(trajectory_lengths)
+        return appended_steps, np.mean(cumulative_rewards), np.mean(trajectory_lengths)
 
     def close_env(self):
         self.env.close()
@@ -494,16 +546,39 @@ class SAC_Meta_Learner:
         steps_per_update = hyperparameters['steps_per_update']
         tau = hyperparameters['tau']
 
-
         replay_buffer = SACBuffer(max_buffer_size=buffer_size, obs_space=self.obs_space, action_space=self.action_space)
 
         mean_rewards = []
         mean_episode_lengths = []
+
+        value_losses, policy_losses, entropy_losses, q1_losses, q2_losses = [], [], [], [], []
+
         self.step = 0
+        logging_steps = 0
 
         while self.step < max_steps:
-            buffer, steps_taken, mean_reward, mean_episode_length = self.generate_trajectories_and_fill_buffer(
+
+            steps_taken, mean_reward, mean_episode_length = self.generate_trajectories_and_fill_buffer(
                 buffer=replay_buffer, time_horizon=time_horizon)
+
+            if self.step > logging_steps*hyperparameters['logging_period']:
+                if self.is_meta_learning:
+                    self.writer.add_scalar(
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(
+                            self.meta_step) + r"/SAC Cumulative Reward",
+                        np.mean(mean_rewards), self.step)
+                    self.writer.add_scalar(
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(
+                            self.meta_step) + r"/SAC Mean Episode Lengths",
+                        np.mean(mean_episode_lengths), self.step)
+                else:
+                    self.writer.add_scalar(
+                        "Environment/Cumulative Reward", np.mean(mean_rewards), self.step)
+                    self.writer.add_scalar("Environment/Episode Length",
+                                           np.mean(mean_episode_lengths), self.step)
+                mean_rewards.clear()
+                mean_episode_lengths.clear()
+
             print("Buffer filled, {} steps taken".format(steps_taken))
             mean_rewards.append(mean_reward)
             mean_episode_lengths.append(mean_episode_length)
@@ -511,9 +586,8 @@ class SAC_Meta_Learner:
             self.step += steps_taken
             update_steps = 0
             frame_start = time.time()
-            value_losses, policy_losses, entropy_losses, q1_losses, q2_losses = [], [], [], [], []
             while update_steps * steps_per_update < steps_taken:
-                batch = buffer.sample_batch(batch_size=batch_size)
+                batch = replay_buffer.sample_batch(batch_size=batch_size)
                 p_loss, total_v_loss, e_loss,losses, curiosity_loss = self.calc_losses(batch, hyperparameters)
                 value_losses.append(losses['Value Loss'])
                 policy_losses.append(losses['Policy Loss'])
@@ -531,15 +605,18 @@ class SAC_Meta_Learner:
                 p_loss.backward()
                 total_v_loss.backward()
 
+                if self.enable_curiosity:
+                    self.curiosity.optimizer.zero_grad()
+                    curiosity_loss.backward()
+                    for network in self.curiosity.get_networks():
+                        torch.nn.utils.clip_grad_norm_(network.parameters(), 5.0)
+                    self.curiosity.optimizer.step()
+                    self.curiosity.learning_rate_scheduler.step()
+
                 torch.nn.utils.clip_grad_norm_(self.all_parameters, 10.0)
 
                 self.policy_optimizer.step()
                 self.value_optimizer.step()
-
-                # for network in self.get_networks_and_parameters()['networks']:
-                #     for param in network.parameters():
-                #         print("Parameter2: ")
-                #         print(param)
 
                 if (hyperparameters['decay_lr']):
                     self.learning_rate_scheduler_p.step(epoch=self.step)
@@ -551,38 +628,52 @@ class SAC_Meta_Learner:
                     self.networks.soft_update(self.networks.policy_network.critic,
                                               self.networks.target_network, tau=tau)
 
-                update_steps += 1
+            if self.step > logging_steps*hyperparameters['logging_period']:
+                logging_steps += 1
 
-            if self.is_meta_learning:
-                self.writer.add_scalar('Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Entropy Loss", np.mean(entropy_losses), self.step)
-                self.writer.add_scalar('Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Policy Loss", np.mean(policy_losses), self.step)
-                self.writer.add_scalar(
-                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Value Loss",
-                    np.mean(value_losses), self.step)
-                self.writer.add_scalar(
-                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Q1 Loss",
-                    np.mean(q1_losses), self.step)
-                self.writer.add_scalar(
-                    'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\SAC Q2 Loss",
-                    np.mean(q2_losses), self.step)
-            else:
-                self.writer.add_scalar("Losses/Entropy Loss",
-                    np.mean(entropy_losses), self.step)
-                self.writer.add_scalar("Losses/Policy Loss",
-                    np.mean(policy_losses), self.step)
-                self.writer.add_scalar(
-                    "Losses/Value Loss",
-                    np.mean(value_losses), self.step)
-                self.writer.add_scalar(
-                    "Losses/Q1 Loss",
-                    np.mean(q1_losses), self.step)
-                self.writer.add_scalar(
-                    "Losses/Q2 Loss",
-                    np.mean(q2_losses), self.step)
+                if self.is_meta_learning:
+                    self.writer.add_scalar('Meta Learning Parameters/Learning Rate',
+                                           self.learning_rate_scheduler_v.get_lr()[0], self.meta_step)
+                    self.writer.add_scalar(
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/SAC Policy Loss",
+                        np.mean(policy_losses), self.step)
+                    self.writer.add_scalar(
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/SAC Value Loss",
+                        np.mean(value_losses), self.step)
+                    self.writer.add_scalar(
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/SAC Entropy Loss",
+                        np.mean(entropy_losses), self.step)
+                    self.writer.add_scalar(
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/SAC Q1 Loss",
+                        np.mean(q1_losses), self.step)
+                    self.writer.add_scalar(
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/SAC Q2 Loss",
+                        np.mean(q2_losses), self.step)
+                else:
+                    self.writer.add_scalar("Policy/Learning Rate", self.learning_rate_scheduler_v.get_lr()[0], self.step)
+                    self.writer.add_scalar("Losses/Entropy Loss",
+                        np.mean(entropy_losses), self.step)
+                    self.writer.add_scalar("Losses/Policy Loss",
+                        np.mean(policy_losses), self.step)
+                    self.writer.add_scalar(
+                        "Losses/Value Loss",
+                        np.mean(value_losses), self.step)
+                    self.writer.add_scalar(
+                        "Losses/Q1 Loss",
+                        np.mean(q1_losses), self.step)
+                    self.writer.add_scalar(
+                        "Losses/Q2 Loss",
+                        np.mean(q2_losses), self.step)
+
+                value_losses.clear()
+                policy_losses.clear()
+                entropy_losses.clear()
+                q1_losses.clear()
+                q2_losses.clear()
+
+
             frame_end = time.time()
             print("Current Update rate = {} updates per second".format(steps_taken / (frame_end - frame_start)))
-
-        return np.mean(mean_rewards), np.mean(mean_episode_lengths)
 
 
 if __name__ == '__main__':
@@ -599,7 +690,7 @@ if __name__ == '__main__':
 
     sac_module = SAC_Meta_Learner(device, writer=writer, is_meta_learning=False)
 
-    env = init_unity_env("mMaze/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
+    env = init_unity_env("mMaze.app", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
                          agent_x=0, agent_z=0, target_x=0, target_z=1, base_port=4000)
 
     ########################## Hyperparameters for train Run ############################
@@ -608,23 +699,23 @@ if __name__ == '__main__':
     training_parameters = sac_module.get_default_hyperparameters()
 
     training_parameters['Algorithm'] = "SAC"
-    training_parameters['enable_curiosity'] = True
+    training_parameters['enable_curiosity'] = False
     training_parameters['run_id'] = run_id
 
     training_parameters['max_steps'] = 1000000
-    training_parameters['buffer_size'] = 20000  # Replay buffer size
+    training_parameters['buffer_size'] = 5000  # Replay buffer size
     training_parameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
     training_parameters['batch_size'] = 512  # Typical range: 32-512
     training_parameters['hidden_layers'] = 2
-    training_parameters['layer_size'] = 256
-    training_parameters['time_horizon'] = 256
+    training_parameters['layer_size'] = 128
+    training_parameters['time_horizon'] = 512
     training_parameters['gamma'] = 0.99
     training_parameters['decay_lr'] = True
 
     training_parameters[
         'init_coeff'] = 0.5  # Typical range: 0.05 - 0.5 Decrease for less exploration but faster convergence
     training_parameters['tau'] = 0.005  # Typical range: 0.005 - 0.01 decrease for stability
-    training_parameters['steps_per_update'] = 1  # Typical range: 1 - 20 -> Equal to number of agents in scene
+    training_parameters['steps_per_update'] = 10  # Typical range: 1 - 20 -> Equal to number of agents in scene
     training_parameters['adaptive_coeff'] = True  # Whether entropy coeff should be learned
 
     sac_module.set_env_and_detect_spaces(env, task=0)

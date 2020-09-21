@@ -1,5 +1,3 @@
-import os
-from typing import Dict, List, Tuple
 from itertools import chain
 from copy import deepcopy
 
@@ -7,7 +5,6 @@ import time
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
@@ -32,22 +29,22 @@ class MetaLearner():
         self.writer = writer
         self.device = device
 
-    def sample_task(self):
-        task = init_unity_env('mMaze_r3/RLProject.exe', maze_seed=0, maze_rows=3, maze_cols=3, random_target=0,
-                              random_agent=0, agent_x=0, agent_z=0, target_x=0, target_z=2, enable_heatmap=True)
-        task_number = 0
+
+    def sample_task_from_distribution(self, maze_distribution: list, task_distribution: list):
+        sampled_size = np.where(np.random.multinomial(1, maze_distribution) == 1)[0] + 2
+        sampled_task = np.where(np.random.multinomial(1, task_distribution) == 1)[0] + 1
+
+        target_pos = sampled_task * [1, 0]
+
+        task = init_unity_env('mMaze_r3/mMaze.app', maze_seed=0, maze_rows=sampled_size, maze_cols=sampled_size, random_target=0,
+                              random_agent=0, agent_x=0, agent_z=0, target_x=sampled_task, target_z=sampled_task, enable_heatmap=True)
 
         return task, task_number
-
-    def reptile(self):
-        pass
 
     def meta_learn(self, algorithm: str, learner, num_meta_updates: int, meta_lr: float):
         start_time = time.localtime()
         start_time = time.strftime("%H:%M:%S", start_time)
         print("Meta Learning started at: " + start_time)
-
-        use_sgd = False
 
         updated_parameters = None
 
@@ -62,11 +59,17 @@ class MetaLearner():
         print("Hyperparameters for this run")
         print(str(hyperparameters))
 
+        maze_dist = [0.6, 0.3, 0.08, 0.02]
+        task_dist = [0.7, 0.2, 0.1]
+        print("Distribution over Maze sizes: " + str(maze_dist))
+        print("Distribution over Tasks: " + str(task_dist))
+
+
         for meta_step in range(num_meta_updates):
             meta_start = time.time()
             print("Meta step: {} of {}".format(meta_step, num_meta_updates))
 
-            task, task_number = self.sample_task()
+            task, task_number = self.sample_task_from_distribution(maze_dist, task_dist)
 
             hyperparameters['learning_rate'] = hyperparameters['learning_rate'] * (1 - meta_step / num_meta_updates)
 
@@ -79,7 +82,7 @@ class MetaLearner():
                                                        updated_parameters):
                     network.load_state_dict(updated_parameters)
 
-            if not use_sgd and meta_step == 0:
+            if meta_step == 0:
                 networks = learner.get_networks_and_parameters()['networks']
                 optimizer_params = []
                 for network in networks:

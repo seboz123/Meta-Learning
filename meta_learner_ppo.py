@@ -38,8 +38,12 @@ class PPO_Meta_Learner:
         hyperparameters['Algorithm'] = "PPO"
 
         hyperparameters['enable_curiosity'] = True
-        hyperparameters['curiosity_lambda'] = 0.1 # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
+        hyperparameters['curiosity_lambda'] = 10 # Factor of weight of curiosity loss
         hyperparameters['curiosity_beta'] = 0.2 # Factor for using more of forward loss or more of inverse loss
+        hyperparameters['curiosity_enc_size'] = 32 # Encoding size of curiosity_module
+        hyperparameters['curiosity_layers'] = 2 # Layers of Curiosity Modules
+        hyperparameters['curiosity_units'] = 128 # Number of hidden units for curiosity modules
+
 
         hyperparameters['max_steps'] = 1000000
         hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
@@ -87,9 +91,11 @@ class PPO_Meta_Learner:
 
         if hyperparameters['enable_curiosity']:
             self.enable_curiosity = True
-            self.curiosity = CuriosityModule(obs_size=obs_dim, enc_size=64, hidden_layers=2,hidden_size=128, learning_rate=0.003, device=self.device, action_shape=self.action_space)
+            self.curiosity = CuriosityModule(obs_size=obs_dim, enc_size=hyperparameters['curiosity_enc_size'],
+                                             hidden_layers=hyperparameters['curiosity_layers'],
+                                             hidden_size=hyperparameters['curiosity_units'], learning_rate=0.003,
+                                             device=self.device, action_shape=self.action_space)
             print("Enabled curiosity module")
-
 
         linear_schedule = lambda epoch: max((1 - epoch / max_scheduler_steps), 1e-6)
 
@@ -97,7 +103,7 @@ class PPO_Meta_Learner:
 
     def get_networks_and_parameters(self):
         networks_and_parameters = {'networks': [self.policy]}
-        if self.curiosity is not None:
+        if self.enable_curiosity:
             for network in self.curiosity.get_networks():
                 networks_and_parameters['networks'].append(network)
         networks_and_parameters['parameters'] = []
@@ -446,7 +452,7 @@ class PPO_Meta_Learner:
 
         if self.enable_curiosity:
             f_loss, i_loss = self.curiosity.calc_loss_ppo_sac(buffer)
-            curiosity_loss = 1 / hyperparameters['curiosity_lambda'] * (hyperparameters['curiosity_beta'] * f_loss + (1-hyperparameters['curiosity_beta']) * i_loss)
+            curiosity_loss = hyperparameters['curiosity_lambda'] * (hyperparameters['curiosity_beta'] * f_loss + (1-hyperparameters['curiosity_beta']) * i_loss)
             losses['Curiosity Forward Loss'] = f_loss.item()
             losses['Curiosity Inverse Loss'] = i_loss.item()
         else:
@@ -478,18 +484,9 @@ class PPO_Meta_Learner:
 
             epsilon = max(hyperparameters['epsilon'] * (1 - self.step/max_steps), 0.1)
             beta = max(hyperparameters['beta'] * (1 - self.step/max_steps), 1e-5)
-            learning_rate = max(hyperparameters['learning_rate'] * (1 - self.step/max_steps), 1e-6)
-
-            for param in self.optimizer.param_groups:
-                param['lr'] = learning_rate
 
             buffer = PPOBuffer(buffer_size=buffer_size, obs_size=self.obs_space, action_space=self.action_space)
             mean_reward, mean_episode_length = self.generate_and_fill_buffer(hyperparameters=hyperparameters, buffer=buffer)
-
-            # print("Generated Buffer:")
-            # np.set_printoptions(suppress=True, threshold=np.inf)
-            # print(buffer.returns.shape)
-            # print(buffer.rewards.shape)
 
             mean_rewards.append(mean_reward)
             mean_episode_lengths.append(mean_episode_length)
@@ -498,6 +495,7 @@ class PPO_Meta_Learner:
             self.step += buffer_length
 
             total_losses ,p_losses, v_losses, entropies, kls, curio_f_losses, curio_i_losses = [], [], [], [], [], [], []
+
             for i in range(hyperparameters['num_epochs']):
                 batches = buffer.split_into_batches(batch_size=batch_size)
                 for batch in batches:
@@ -515,14 +513,13 @@ class PPO_Meta_Learner:
                         for network in self.curiosity.get_networks():
                             torch.nn.utils.clip_grad_norm_(network.parameters(), 5.0)
                         self.curiosity.optimizer.step()
+                        self.curiosity.learning_rate_scheduler.step()
                     self.optimizer.zero_grad()
                     loss.backward()
                     # Gradient clipping
                     torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 5.0)
                     self.optimizer.step()
-            #
-            # if(hyperparameters['decay_lr']):
-            #     self.learning_rate_scheduler.step(epoch=self.step)
+            self.learning_rate_scheduler.step(self.step)
 
             print("Total Loss: {}".format(np.mean(total_losses)))
             print("Value Loss: {}".format(np.mean(v_losses)))
@@ -534,6 +531,8 @@ class PPO_Meta_Learner:
 
 
             if self.is_meta_learning:
+                self.writer.add_scalar('Meta Learning Parameters/Learning Rate', self.learning_rate_scheduler.get_lr()[0],
+                                       self.meta_step)
                 self.writer.add_scalar(
                     'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/PPO Policy Loss",
                     np.mean(p_losses), self.step)
@@ -548,12 +547,13 @@ class PPO_Meta_Learner:
                     np.mean(kls), self.step)
                 if self.enable_curiosity:
                     self.writer.add_scalar(
-                        'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\PPO Curiosity Forward Loss",
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/PPO Curiosity Forward Loss",
                         np.mean(curio_f_losses), self.step)
                     self.writer.add_scalar(
-                        'Task: ' + str(self.task) + r"\Meta Step: " + str(self.meta_step) + r"\PPO Curiosity Inverse Loss",
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/PPO Curiosity Inverse Loss",
                         np.mean(curio_i_losses), self.step)
             else:
+                self.writer.add_scalar('Policy/Learning Rate', self.learning_rate_scheduler.get_lr()[0], self.step)
                 self.writer.add_scalar(
                     'Losses/Policy Loss', np.mean(p_losses), self.step)
                 self.writer.add_scalar(
@@ -567,12 +567,12 @@ class PPO_Meta_Learner:
                     np.mean(kls), self.step)
                 if self.enable_curiosity:
                     self.writer.add_scalar(
-                        'Task: ' + str(self.task) + r"\Meta Step: " + str(
-                            self.meta_step) + r"\PPO Curiosity Forward Loss",
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(
+                            self.meta_step) + r"/PPO Curiosity Forward Loss",
                         np.mean(curio_f_losses), self.step)
                     self.writer.add_scalar(
-                        'Task: ' + str(self.task) + r"\Meta Step: " + str(
-                            self.meta_step) + r"\PPO Curiosity Inverse Loss",
+                        'Task: ' + str(self.task) + r"/Meta Step: " + str(
+                            self.meta_step) + r"/PPO Curiosity Inverse Loss",
                         np.mean(curio_i_losses), self.step)
 
         return np.mean(mean_rewards), np.mean(mean_episode_lengths)
@@ -609,7 +609,7 @@ if __name__ == '__main__':
     training_parameters['time_horizon'] = 512
     training_parameters['gamma'] = 0.99
     training_parameters['decay_lr'] = True
-    training_parameters['enable_curiosity'] = True
+    training_parameters['enable_curiosity'] = False
 
     training_parameters['beta'] = 0.001 # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
     training_parameters['epsilon'] = 0.2 # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability

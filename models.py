@@ -50,6 +50,8 @@ class ActorCriticPolicy(nn.Module):
         def __init__(self, state_dim, hidden_size, num_hidden_layers, enable_curiosity: bool):
             nn.Module.__init__(self)
 
+            self.enable_curiosity = enable_curiosity
+
             hidden_layers = [nn.Sequential(
                 nn.Linear(state_dim, hidden_size),
                 Swish(),
@@ -59,16 +61,21 @@ class ActorCriticPolicy(nn.Module):
                     nn.Linear(hidden_size, hidden_size),
                     Swish(),
                 ))
-            out_layer = nn.Linear(hidden_size, 1)
 
-            self.value_layer = nn.Sequential(
-                *hidden_layers, out_layer
-            )
+
+            self.hidden_layer = nn.Sequential(
+                *hidden_layers)
+            if enable_curiosity:
+                self.curiosity_layer = nn.Linear(hidden_size, 1)
+            self.out_layer = nn.Linear(hidden_size, 1)
+
 
         def forward(self, obs: torch.Tensor):
-            assert type(obs) == torch.Tensor
-            value = self.value_layer(obs)
-            return value
+            hidden = self.hidden_layer(obs)
+            values = [self.out_layer(hidden).squeeze()]
+            if self.enable_curiosity:
+                values.append(self.curiosity_layer(hidden))
+            return values
 
     class Actor(nn.Module):
         def __init__(self, state_dim, act_dim, hidden_size, num_hidden_layers):
@@ -117,18 +124,25 @@ class ValueNetwork(nn.Module):
     Output: [Act_dim*batch_size] value for every action
     """
 
-    def __init__(self, obs_dim, act_dim, hidden_size, num_layers):
+    def __init__(self, obs_dim, act_dim, hidden_size, num_layers, enable_curiosity: bool):
         super(ValueNetwork, self).__init__()
+        self.enable_curiosity = enable_curiosity
         layers = [nn.Linear(obs_dim, hidden_size), Swish()]
         for _ in range(num_layers - 1):
             layers.append(nn.Linear(hidden_size, hidden_size))
             layers.append(Swish())
-        layers.append(nn.Linear(hidden_size, act_dim))
-        self.seq_layers = torch.nn.Sequential(*layers)
+        self.hidden_layers = torch.nn.Sequential(*layers)
+        self.out_layer = nn.Linear(hidden_size, act_dim)
+        if enable_curiosity:
+            self.curiosity_layer = nn.Linear(hidden_size, act_dim)
+
 
     def forward(self, obs: torch.Tensor):
-        return self.seq_layers(obs)
-
+        hidden = self.hidden_layers(obs)
+        values = [self.out_layer(hidden).squeeze()]
+        if self.enable_curiosity:
+            values.append(self.curiosity_layer(hidden).squeeze())
+        return values
 
 class PolicyValueNetwork(nn.Module):
     """
@@ -137,12 +151,12 @@ class PolicyValueNetwork(nn.Module):
     Output: Value(act_size)
     """
 
-    def __init__(self, obs_dim, act_dim, hidden_size, hidden_layers):
+    def __init__(self, obs_dim, act_dim, hidden_size, hidden_layers, enable_curiosity: bool):
         super(PolicyValueNetwork, self).__init__()
         values_out = sum(act_dim)
 
-        self.q1 = ValueNetwork(obs_dim, values_out, hidden_size, hidden_layers)
-        self.q2 = ValueNetwork(obs_dim, values_out, hidden_size, hidden_layers)
+        self.q1 = ValueNetwork(obs_dim, values_out, hidden_size, hidden_layers, enable_curiosity)
+        self.q2 = ValueNetwork(obs_dim, values_out, hidden_size, hidden_layers, enable_curiosity)
 
     def forward(self, obs: torch.Tensor) -> (torch.Tensor, torch.Tensor):
         q1_out = self.q1(obs)
@@ -239,7 +253,8 @@ class DeepQNetwork(nn.Module):
             hidden_size: int,
             num_hidden_layers: int,
             atom_size: int,
-            support: torch.Tensor
+            support: torch.Tensor,
+            enable_curiosity: bool
     ):
         """Initialization."""
         super(DeepQNetwork, self).__init__()
@@ -251,12 +266,12 @@ class DeepQNetwork(nn.Module):
         # set common feature layer
         feature_layers = [nn.Sequential(
             nn.Linear(in_dim, hidden_size),
-            nn.ReLU(),
+            Swish(),
         )]
         for i in range(num_hidden_layers - 1):
             feature_layers.append(nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU()))
+            Swish()))
         self.feature_layer = nn.Sequential(*feature_layers)
 
         # set advantage layer
@@ -267,12 +282,21 @@ class DeepQNetwork(nn.Module):
         self.value_hidden_layer = NoisyLinear(hidden_size, hidden_size)
         self.value_layer = NoisyLinear(hidden_size, atom_size)
 
+        if enable_curiosity:
+            self.curiosity_layer = nn.Linear(hidden_size, 1)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward method implementation."""
         dist = self.dist(x)
         q = torch.sum(dist * self.support, dim=2)
 
         return q
+
+    def get_curiosity_value(self, x: torch.Tensor):
+        feature = self.feature_layer(x)
+        value_hidden = self.value_hidden_layer(feature)
+        value = self.curiosity_layer(value_hidden)
+        return value
 
     def dist(self, x: torch.Tensor) -> torch.Tensor:
         """Get distribution for atoms."""

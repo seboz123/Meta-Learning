@@ -21,11 +21,6 @@ class CuriosityModule():
             self.forwardModel = ForwardModel(enc_size=enc_size, act_size=len(action_shape), hidden_size=hidden_size, hidden_layers=hidden_layers).to(device)
             self.inverseModel = InverseModel(enc_size=enc_size, act_size=action_shape, hidden_size=hidden_size, hidden_layers=hidden_layers).to(device)
 
-        elif action_flattener is not None:
-            self.forwardModel = ForwardModel(enc_size=enc_size, act_size=sum(action_flattener.action_shape), hidden_size=hidden_size, hidden_layers=hidden_layers).to(device)
-            self.inverseModel = InverseModel(enc_size=enc_size, act_size=action_flattener.action_shape, hidden_size=hidden_size, hidden_layers=hidden_layers).to(device)
-
-
         self.networks = [self.encoderModel, self.forwardModel, self.inverseModel]
 
         # self.flattener = action_flattener
@@ -41,35 +36,26 @@ class CuriosityModule():
         return self.networks
 
 
-    def calc_loss_rainbow(self, memory_n, indices) -> torch.Tensor:
-        samples = memory_n.sample_batch_from_idxs(indices)
-        action_shape = self.flattener.action_shape
-        actions = []
-        for action in samples['acts']:
-            action = self.flattener.lookup_action(int(action))
-            tmp_actions = []
-            for i, shape in enumerate(action_shape):
-                for k in range(shape):
-                    if (k == action[i]):
-                        tmp_actions.append(1)
-                    else:
-                        tmp_actions.append(0)
-            actions.append(tmp_actions)
+    def calc_loss_rainbow(self, samples, action_flattener, action_dim: list) -> torch.Tensor:
+        actions = [action_flattener.lookup_action(int(action)) for action in samples['acts']]
         acts = torch.Tensor(actions).to(dtype=torch.int64, device=self.device)
-        obs = torch.FloatTensor(samples['obs']).to(dtype=torch.float32, device=self.device)
-        obs = self.encoderModel(obs)
-        next_obs = torch.FloatTensor(samples['next_obs']).to(dtype=torch.float32, device=self.device)
-        next_obs = self.encoderModel(next_obs)
+        true_actions = torch.cat(actions_to_onehot(acts, action_dim), dim=1)
 
+        obs = torch_from_np(samples['obs'], self.device)
+        next_obs = torch_from_np(samples['next_obs'], self.device)
+
+        enc_obs = self.encoderModel(obs)
+        enc_next_obs = self.encoderModel(next_obs)
         # Encode obs and next_obs
         # Predict states and actions
-        pred_states = self.forwardModel(obs, acts)
-        pred_acts = self.inverseModel(obs, next_obs)
+        pred_states = self.forwardModel(enc_obs, acts)
+        pred_acts = self.inverseModel(enc_obs, enc_next_obs)
+
         # Calculate MSE and Cross-Entropy-Error
         mean_squared_loss = nn.MSELoss()
-        forward_loss = mean_squared_loss(pred_states, next_obs)
+        forward_loss = mean_squared_loss(pred_states, enc_next_obs)
 
-        cross_entropy_loss = -torch.log(pred_acts + 1e-10) * acts
+        cross_entropy_loss = -torch.log(pred_acts + 1e-10) * true_actions
         inverse_loss = torch.mean(torch.sum(cross_entropy_loss, dim=1))
 
         return forward_loss, inverse_loss
@@ -177,7 +163,7 @@ class InverseModel(nn.Module):
             Swish()
         )]
         for _ in range(hidden_layers - 1):
-            layers.append(nn.Sequential(nn.Linear(enc_size * 2, hidden_size),
+            layers.append(nn.Sequential(nn.Linear(hidden_size, hidden_size),
                                         Swish()))
         self.hidden_layers = nn.Sequential(*layers)
         self.out_layers = nn.Sequential(

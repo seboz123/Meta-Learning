@@ -14,14 +14,24 @@ import itertools
 def torch_from_np(array: np.ndarray, device: str = 'cpu') -> torch.Tensor:
     return torch.as_tensor(np.asanyarray(array)).to(device)
 
-def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space) -> torch.Tensor:
+def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space, enable_curiosity: bool) -> torch.Tensor:
+    condensed_qs = []
     one_hot_actions = actions_to_onehot(actions, action_space)
-    branched_q1 = break_into_branches(q_out, action_space)
-    only_qs = torch.stack([torch.sum(act_branch * q_branch, dim=1, keepdim=True) for act_branch, q_branch in
-                 zip(one_hot_actions, branched_q1)])
-    condensed_q = torch.mean(only_qs, dim=0)
-
-    return condensed_q
+    if enable_curiosity:
+        for i in range(2):
+            branched_q1 = break_into_branches(q_out[:, :, i], action_space)
+            only_qs = torch.stack([torch.sum(act_branch * q_branch, dim=1, keepdim=True) for act_branch, q_branch in
+                         zip(one_hot_actions, branched_q1)])
+            cond_q = torch.mean(only_qs, dim=0)
+            condensed_qs.append(cond_q)
+    else:
+        for i in range(1):
+            branched_q1 = break_into_branches(q_out[:,:, i], action_space)
+            only_qs = torch.stack([torch.sum(act_branch * q_branch, dim=1, keepdim=True) for act_branch, q_branch in
+                         zip(one_hot_actions, branched_q1)])
+            cond_q = torch.mean(only_qs, dim=0)
+            condensed_qs.append(cond_q)
+    return condensed_qs
 
 def get_probs_and_entropies(acts: torch.FloatTensor, dists: List[torch.distributions.Categorical], device):
     cumulated_log_probs = torch.zeros([acts.shape[0]]).to(device)
