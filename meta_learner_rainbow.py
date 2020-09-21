@@ -45,11 +45,11 @@ class Rainbow_Meta_Learner:
         hyperparameters['logging_period'] = 2000
 
         hyperparameters['enable_curiosity'] = True
-        hyperparameters['curiosity_lambda'] = 10 # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
-        hyperparameters['curiosity_beta'] = 0.2 # Factor for using more of forward loss or more of inverse loss
-        hyperparameters['curiosity_enc_size'] = 32 # Encoding size of curiosity_module
-        hyperparameters['curiosity_layers'] = 2 # Layers of Curiosity Modules
-        hyperparameters['curiosity_units'] = 128 # Number of hidden units for curiosity modules
+        hyperparameters['curiosity_lambda'] = 10    # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
+        hyperparameters['curiosity_beta'] = 0.2     # Factor for using more of forward loss or more of inverse loss
+        hyperparameters['curiosity_enc_size'] = 32  # Encoding size of curiosity_module
+        hyperparameters['curiosity_layers'] = 2     # Layers of Curiosity Modules
+        hyperparameters['curiosity_units'] = 128    # Number of hidden units for curiosity modules
 
 
         hyperparameters['max_steps'] = 1000000
@@ -57,13 +57,13 @@ class Rainbow_Meta_Learner:
         hyperparameters['batch_size'] = 512  # Typical range: 32-512
         hyperparameters['hidden_layers'] = 2
         hyperparameters['layer_size'] = 256
-        hyperparameters['time_horizon'] = 64
+        hyperparameters['time_horizon'] = 128
         hyperparameters['gamma'] = 0.99
         hyperparameters['decay_lr'] = True
 
 
         hyperparameters['buffer_size'] = 5000  # Replay buffer size
-        hyperparameters['steps_per_update'] = 1
+        hyperparameters['steps_per_update'] = 12
 
 
         hyperparameters['epsilon'] = 0.15  # Percentage to explore epsilon = 0 -> Decaying after half training
@@ -386,7 +386,7 @@ class Rainbow_Meta_Learner:
         self.env.close()
 
     def train(self, hyperparameters: dict):
-        self.writer.add_text("training_parameters", str(hyperparameters))
+        self.writer.add_text("Hyperparameters", str(hyperparameters))
         print("Started run with following hyperparameters:")
         for key in hyperparameters:
             print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
@@ -501,7 +501,7 @@ class Rainbow_Meta_Learner:
 
 if __name__ == '__main__':
 
-    run_id = "results/dqn_0"
+    run_id = "results/dqn_1"
 
     writer = SummaryWriter(run_id)
 
@@ -514,7 +514,7 @@ if __name__ == '__main__':
 
     dqn_module = Rainbow_Meta_Learner(device=device, writer=writer, is_meta_learning=False)
 
-    env = init_unity_env("mMaze.app", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=0, target_z=1)
+    env = init_unity_env("mMaze.app", maze_rows=2, maze_cols=2, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=0, target_z=1)
 
     ############ Hyperparameters DQN ##############
     training_parameters = dqn_module.get_default_hyperparameters()
@@ -524,20 +524,20 @@ if __name__ == '__main__':
     training_parameters['enable_curiosity'] = False
 
 
-    training_parameters['max_steps'] = 1000000
-    training_parameters['buffer_size'] = 2000 # Replay buffer size
-    training_parameters['steps_per_update'] = 1
-    training_parameters['learning_rate'] = 0.0003 # Typical range: 0.00001 - 0.001
-    training_parameters['batch_size'] = 512 # Typical range: 32-512
-    training_parameters['hidden_layers'] = 2
-    training_parameters['layer_size'] = 256
-    training_parameters['time_horizon'] = 128
-    training_parameters['gamma'] = 0.99
-    training_parameters['decay_lr'] = True
+    training_parameters['max_steps'] = 100000       # Maximum Training steps
+    training_parameters['buffer_size'] = 5000       # Replay buffer size
+    training_parameters['steps_per_update'] = 12    # Number of env steps to equal an update step
+    training_parameters['learning_rate'] = 0.0003   # Typical range: 0.00001 - 0.001
+    training_parameters['batch_size'] = 512         # Typical range: 32-512
+    training_parameters['hidden_layers'] = 2        # Number of hidden layers
+    training_parameters['layer_size'] = 256         # Hidden units
+    training_parameters['time_horizon'] = 128       # Time Horizon
+    training_parameters['gamma'] = 0.99             # Discount Factor
+    training_parameters['decay_lr'] = True          # Whether to decay lr
 
     ### DQN specific
 
-    training_parameters['epsilon'] = 0.05          # Exploration vs Exploitation Percentage to explore. epsilon = 0 -> No exploring is decaying to zero after half of training steps
+    training_parameters['epsilon'] = 0.00          # Exploration vs Exploitation Percentage to explore. epsilon = 0 -> No exploring is decaying to zero after half of training steps
     training_parameters['v_max'] = 13              # Maximum Value of Reward
     training_parameters['v_min'] = -13             # Minimum Value of Reward
     training_parameters['atom_size'] = 51          # Atom Size for categorical DQN

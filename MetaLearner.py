@@ -30,14 +30,22 @@ class MetaLearner():
         self.device = device
 
 
-    def sample_task_from_distribution(self, maze_distribution: list, task_distribution: list):
-        sampled_size = np.where(np.random.multinomial(1, maze_distribution) == 1)[0] + 2
-        sampled_task = np.where(np.random.multinomial(1, task_distribution) == 1)[0] + 1
+    def sample_task_from_distribution(self, task_distribution: list):
+        sampled_size = np.where(np.random.multinomial(1, task_distribution) == 1)[0] + 2
+        target_x = np.random.randint(0, sampled_size)
+        target_z = np.random.randint(0, sampled_size)
 
-        target_pos = sampled_task * [1, 0]
+        agent_x = np.random.randint(0, sampled_size)
+        agent_z = np.random.randint(0, sampled_size)
 
-        task = init_unity_env('mMaze_r3/mMaze.app', maze_seed=0, maze_rows=sampled_size, maze_cols=sampled_size, random_target=0,
-                              random_agent=0, agent_x=0, agent_z=0, target_x=sampled_task, target_z=sampled_task, enable_heatmap=True)
+        if agent_z == agent_x and agent_x == target_x and target_x == target_z:
+            task, task_number = self.sample_task_from_distribution(task_distribution)
+        else:
+
+            task = init_unity_env('mMaze.app', maze_seed=0, maze_rows=sampled_size, maze_cols=sampled_size, random_target=0,
+                              random_agent=0, agent_x=agent_x, agent_z=agent_z, target_x=target_x, target_z=target_z, enable_heatmap=True)
+
+            task_number = 0
 
         return task, task_number
 
@@ -59,9 +67,7 @@ class MetaLearner():
         print("Hyperparameters for this run")
         print(str(hyperparameters))
 
-        maze_dist = [0.6, 0.3, 0.08, 0.02]
         task_dist = [0.7, 0.2, 0.1]
-        print("Distribution over Maze sizes: " + str(maze_dist))
         print("Distribution over Tasks: " + str(task_dist))
 
 
@@ -69,7 +75,7 @@ class MetaLearner():
             meta_start = time.time()
             print("Meta step: {} of {}".format(meta_step, num_meta_updates))
 
-            task, task_number = self.sample_task_from_distribution(maze_dist, task_dist)
+            task, task_number = self.sample_task_from_distribution(task_dist)
 
             hyperparameters['learning_rate'] = hyperparameters['learning_rate'] * (1 - meta_step / num_meta_updates)
 
@@ -173,11 +179,11 @@ if __name__ == '__main__':
     meta_learner = MetaLearner(meta_writer, device)
 
     if learner_algorithm == 'ppo':
-        learner = PPO_Meta_Learner(writer=meta_writer, device=device)
+        learner = PPO_Meta_Learner(writer=meta_writer, device=device, is_meta_learning=True)
     elif learner_algorithm == 'sac':
-        learner = SAC_Meta_Learner(writer=meta_writer, device=device)
+        learner = SAC_Meta_Learner(writer=meta_writer, device=device, is_meta_learning=True)
     elif learner_algorithm == 'rainbow':
-        learner = Rainbow_Meta_Learner(writer=meta_writer, device=device)
+        learner = Rainbow_Meta_Learner(writer=meta_writer, device=device, is_meta_learning=True)
     else:
         exit(-1)
 

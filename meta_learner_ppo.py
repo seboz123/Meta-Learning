@@ -467,7 +467,7 @@ class PPO_Meta_Learner:
 
     def train(self, hyperparameters: dict):
 
-        writer.add_text("training_parameters", str(hyperparameters))
+        writer.add_text("Hyperparameters", str(hyperparameters))
         print("Started run with following hyperparameters:")
         for key in hyperparameters:
             print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))

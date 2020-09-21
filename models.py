@@ -275,11 +275,11 @@ class DeepQNetwork(nn.Module):
         self.feature_layer = nn.Sequential(*feature_layers)
 
         # set advantage layer
-        self.advantage_hidden_layer = NoisyLinear(hidden_size, hidden_size)
+        self.advantage_hidden_layer = nn.Sequential(NoisyLinear(hidden_size, hidden_size), Swish())
         self.advantage_layer = NoisyLinear(hidden_size, out_dim * atom_size)
 
         # set value layer
-        self.value_hidden_layer = NoisyLinear(hidden_size, hidden_size)
+        self.value_hidden_layer = nn.Sequential(NoisyLinear(hidden_size, hidden_size), Swish())
         self.value_layer = NoisyLinear(hidden_size, atom_size)
 
         if enable_curiosity:
@@ -301,8 +301,8 @@ class DeepQNetwork(nn.Module):
     def dist(self, x: torch.Tensor) -> torch.Tensor:
         """Get distribution for atoms."""
         feature = self.feature_layer(x)
-        adv_hid = F.relu(self.advantage_hidden_layer(feature))
-        val_hid = F.relu(self.value_hidden_layer(feature))
+        adv_hid = self.advantage_hidden_layer(feature)
+        val_hid = self.value_hidden_layer(feature)
 
         advantage = self.advantage_layer(adv_hid).view(
             -1, self.out_dim, self.atom_size

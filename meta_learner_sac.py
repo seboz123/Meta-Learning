@@ -27,6 +27,7 @@ class TorchNetworks:
         self.device = device
         self.discrete_target_entropy_scale = 0.2
         self.init_entropy_coeff = init_entropy_coeff
+
         ### Actor Critic Policy Network ####
         self.policy_network = ActorCriticPolicy(obs_dim, act_dim, hyperparameters, False).to(device)  # Pi
         ### Value Network of Policy ######
@@ -82,15 +83,15 @@ class SAC_Meta_Learner:
         hyperparameters['logging_period'] = 2000
 
         hyperparameters['enable_curiosity'] = True
-        hyperparameters['curiosity_lambda'] = 10 # Weight factor of curiosity loss
-        hyperparameters['curiosity_beta'] = 0.2 # Factor for using more of forward loss or more of inverse loss
-        hyperparameters['curiosity_enc_size'] = 32 # Encoding size of curiosity_module
-        hyperparameters['curiosity_layers'] = 2 # Layers of Curiosity Modules
-        hyperparameters['curiosity_units'] = 128 # Number of hidden units for curiosity modules
+        hyperparameters['curiosity_lambda'] = 10    # Weight factor of curiosity loss
+        hyperparameters['curiosity_beta'] = 0.2     # Factor for using more of forward loss or more of inverse loss
+        hyperparameters['curiosity_enc_size'] = 32  # Encoding size of curiosity_module
+        hyperparameters['curiosity_layers'] = 2     # Layers of Curiosity Modules
+        hyperparameters['curiosity_units'] = 128    # Number of hidden units for curiosity modules
 
         hyperparameters['max_steps'] = 1000000
-        hyperparameters['learning_rate'] = 0.0001  # Typical range: 0.00001 - 0.001
-        hyperparameters['batch_size'] = 512  # Typical range: 32-512
+        hyperparameters['learning_rate'] = 0.0001   # Typical range: 0.00001 - 0.001
+        hyperparameters['batch_size'] = 512         # Typical range: 32-512
         hyperparameters['hidden_layers'] = 2
         hyperparameters['layer_size'] = 256
         hyperparameters['time_horizon'] = 64
@@ -533,7 +534,7 @@ class SAC_Meta_Learner:
         self.env.close()
 
     def train(self, hyperparameters: dict):
-        self.writer.add_text("training_parameters", str(hyperparameters))
+        self.writer.add_text("Hyperparameters", str(hyperparameters))
         print("Started run with following hyperparameters:")
         print("Started SAC training with {} steps to take".format(hyperparameters['max_steps']))
         for key in hyperparameters:
@@ -587,6 +588,8 @@ class SAC_Meta_Learner:
             update_steps = 0
             frame_start = time.time()
             while update_steps * steps_per_update < steps_taken:
+                update_steps += 1
+                print("Updating. Step {} of {}".format(update_steps*steps_per_update, steps_taken))
                 batch = replay_buffer.sample_batch(batch_size=batch_size)
                 p_loss, total_v_loss, e_loss,losses, curiosity_loss = self.calc_losses(batch, hyperparameters)
                 value_losses.append(losses['Value Loss'])
@@ -599,11 +602,13 @@ class SAC_Meta_Learner:
                 self.value_optimizer.zero_grad()
                 if hyperparameters['adaptive_coeff']:
                     self.entropy_optimizer.zero_grad()
+                    loss_start = time.time()
                     e_loss.backward()
-                    self.entropy_optimizer.step()
-
                 p_loss.backward()
                 total_v_loss.backward()
+                print("Loss calc took: {}".format(time.time()-loss_start))
+
+                self.entropy_optimizer.step()
 
                 if self.enable_curiosity:
                     self.curiosity.optimizer.zero_grad()
@@ -678,7 +683,7 @@ class SAC_Meta_Learner:
 
 if __name__ == '__main__':
 
-    run_id = "results/sac_0"
+    run_id = "results/sac_1"
     writer = SummaryWriter(run_id)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
