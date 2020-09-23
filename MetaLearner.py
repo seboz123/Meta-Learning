@@ -57,25 +57,28 @@ class MetaLearner():
         updated_parameters = None
 
         hyperparameters = learner.get_default_hyperparameters()
-        hyperparameters['buffer_size'] = 5000
-        hyperparameters['max_steps'] = 10000
+        hyperparameters['buffer_size'] = 20000
+        hyperparameters['max_steps'] = 100000
         hyperparameters['time_horizon'] = 512
-        hyperparameters['decay_lr'] = False
+        hyperparameters['decay_lr'] = True
         hyperparameters['learning_rate'] = 0.0003
+        hyperparameters['task_distribution'] = [0.7, 0.2, 0.1]
+        hyperparameters['num_meta_updates'] = num_meta_updates
+        hyperparameters['Meta Learning Rate'] = meta_lr
+        hyperparameters['Meta Algorithm'] = algorithm
+
 
         self.writer.add_text("Hyperparameters", str(hyperparameters))
-        print("Hyperparameters for this run")
-        print(str(hyperparameters))
-
-        task_dist = [0.7, 0.2, 0.1]
-        print("Distribution over Tasks: " + str(task_dist))
+        print("Meta-Hyperparameters:")
+        for key in hyperparameters:
+            print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
 
 
-        for meta_step in range(num_meta_updates):
+        for meta_step in range(hyperparameters['num_meta_updates']):
             meta_start = time.time()
             print("Meta step: {} of {}".format(meta_step, num_meta_updates))
 
-            task, task_number = self.sample_task_from_distribution(task_dist)
+            task, task_number = self.sample_task_from_distribution(hyperparameters['task_distribution'])
 
             hyperparameters['learning_rate'] = hyperparameters['learning_rate'] * (1 - meta_step / num_meta_updates)
 
@@ -94,6 +97,8 @@ class MetaLearner():
                 for network in networks:
                     optimizer_params.extend(network.parameters())
                 self.meta_optimizer = optim.Adam(chain(optimizer_params), lr=meta_lr)
+                exp_schedule = lambda epoch: max(0.99**epoch, 0.001)
+                self.meta_scheduler = optim.lr_scheduler.LambdaLR(self.meta_optimizer, exp_schedule)
 
             for parameter_group in self.meta_optimizer.param_groups:
                 parameter_group['lr'] = hyperparameters['learning_rate']
@@ -101,22 +106,16 @@ class MetaLearner():
             networks_before = deepcopy(learner.get_networks_and_parameters()['networks'])
             theta_before_state_dicts = [network.state_dict() for network in networks_before]
 
+            print("Before Meta step network weights:")
+            for key in theta_before_state_dicts[0]:
+                print(theta_before_state_dicts[0][key])
+                break
 
-
-            mean_reward, mean_episode_length = learner.train(hyperparameters)
-
-            self.writer.add_scalar("task_" + str(task_number) + r"\Overall Mean Cumulative Reward", mean_reward,
-                                   meta_step)
-            self.writer.add_scalar("task_" + str(task_number) + r"\Overall Mean Episode Length", mean_episode_length,
-                                   meta_step)
+            losses = learner.train(hyperparameters)
 
             networks_after = deepcopy(learner.get_networks_and_parameters()['networks'])
             theta_after_state_dicts = [network.state_dict() for network in networks_after]
 
-            print("Inital network weights:")
-            for key in theta_before_state_dicts[0]:
-                print(theta_before_state_dicts[0][key])
-                break
 
             print("After Training network weights")
             for key in theta_after_state_dicts[0]:
@@ -142,12 +141,16 @@ class MetaLearner():
                 self.meta_optimizer.step()
 
             elif algorithm == 'somaml':
-                pass
+                print("Performing Second-Order MAML meta update!")
+                for networks_after, network_before in zip(learner.get_networks_and_parameters()['networks'],
+                                                      networks_before):
+                    network_before.load_state_dict(networks_after.state_dict())
+
             else:
                 print("Please enter a valid algorithm: reptile, fomaml or somaml!")
                 exit(-1)
 
-            print("After Update network weights")
+            print("After Meta step network weights")
             for key in learner.get_networks_and_parameters()['networks'][0].state_dict():
                 print(learner.get_networks_and_parameters()['networks'][0].state_dict()[key])
                 break
@@ -155,14 +158,17 @@ class MetaLearner():
             updated_parameters = theta_after_state_dicts
             learner.meta_step += 1
             learner.close_env()
+
+            self.meta_scheduler.step()
+
             print("Meta update took {:.3f}s".format(time.time() - meta_start))
 
 
 if __name__ == '__main__':
 
-    run_id = "results/meta_sac_0"
-    learner_algorithm = 'sac'
-    meta_learn_algorithm = 'fomaml'
+    run_id = "results/meta_ppo_0"
+    learner_algorithm = 'ppo'
+    meta_learn_algorithm = 'reptile'
 
     meta_writer = SummaryWriter(run_id)
     meta_writer.add_text("Run_ID", run_id)
@@ -187,6 +193,4 @@ if __name__ == '__main__':
     else:
         exit(-1)
 
-    meta_learning_rate = 0.01
-    print("Meta learning rate set to: " + str(meta_learning_rate))
-    meta_learner.meta_learn(meta_learn_algorithm, learner, num_meta_updates=100, meta_lr=meta_learning_rate)
+    meta_learner.meta_learn(meta_learn_algorithm, learner, num_meta_updates=100, meta_lr=1)

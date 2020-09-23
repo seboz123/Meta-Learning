@@ -499,6 +499,9 @@ class Rainbow_Meta_Learner:
                 losses.clear()
                 logging_steps += 1
 
+
+        return [loss]
+
 if __name__ == '__main__':
 
     run_id = "results/dqn_1"

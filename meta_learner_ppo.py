@@ -467,7 +467,7 @@ class PPO_Meta_Learner:
 
     def train(self, hyperparameters: dict):
 
-        writer.add_text("Hyperparameters", str(hyperparameters))
+        self.writer.add_text("Hyperparameters", str(hyperparameters))
         print("Started run with following hyperparameters:")
         for key in hyperparameters:
             print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
@@ -575,7 +575,7 @@ class PPO_Meta_Learner:
                             self.meta_step) + r"/PPO Curiosity Inverse Loss",
                         np.mean(curio_i_losses), self.step)
 
-        return np.mean(mean_rewards), np.mean(mean_episode_lengths)
+        return [loss]
 
 if __name__ == '__main__':
 

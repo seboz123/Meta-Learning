@@ -680,7 +680,7 @@ class SAC_Meta_Learner:
             frame_end = time.time()
             print("Current Update rate = {} updates per second".format(steps_taken / (frame_end - frame_start)))
 
-
+        return [p_loss, total_v_loss, e_loss]
 if __name__ == '__main__':
 
     run_id = "results/sac_1"
