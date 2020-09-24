@@ -579,7 +579,7 @@ class PPO_Meta_Learner:
 
 if __name__ == '__main__':
 
-    run_id = "results/ppo_1"
+    run_id = "results/ppo_0"
 
     writer = SummaryWriter(run_id)
 
@@ -592,29 +592,10 @@ if __name__ == '__main__':
 
     ppo_module = PPO_Meta_Learner(device, writer=writer, is_meta_learning=False)
 
-    env = init_unity_env("mMaze.app", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
-                         agent_x=0, agent_z=0, target_x=0, target_z=1, base_port=4500)
+    env = init_unity_env("mMaze/RLProject.exe", maze_rows=2, maze_cols=2, maze_seed=0, random_agent=0, random_target=0,
+                         agent_x=0, agent_z=0, target_x=0, target_z=1, base_port=4500, enable_sight_cone=True)
 
     training_parameters = ppo_module.get_default_hyperparameters()
-
-    training_parameters['Algorithm'] = "PPO"
-    training_parameters['run_id'] = run_id
-
-    training_parameters['max_steps'] = 5000000
-    training_parameters['buffer_size'] = 30000  # Replay buffer size
-    training_parameters['learning_rate'] = 0.0003  # Typical range: 0.00001 - 0.001
-    training_parameters['batch_size'] = 1024  # Typical range: 32-512
-    training_parameters['hidden_layers'] = 2
-    training_parameters['layer_size'] = 512
-    training_parameters['time_horizon'] = 512
-    training_parameters['gamma'] = 0.99
-    training_parameters['decay_lr'] = True
-    training_parameters['enable_curiosity'] = False
-
-    training_parameters['beta'] = 0.001 # Typical range: 0.0001 - 0.01 Strength of entropy regularization -> make sure entropy falls when reward rises, if it drops too quickly, decrease beta
-    training_parameters['epsilon'] = 0.2 # Typical range: 0.1 - 0.3 Clipping factor of PPO -> small increases stability
-    training_parameters['lambd'] = 0.99 # Typical range: 0.9 - 0.95 GAE Parameter
-    training_parameters['num_epochs'] = 3 # Typical range: 3 - 10
 
     ppo_module.set_env_and_detect_spaces(env, task=0)
     ppo_module.init_networks_and_optimizers(training_parameters)

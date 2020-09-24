@@ -17,20 +17,14 @@ def torch_from_np(array: np.ndarray, device: str = 'cpu') -> torch.Tensor:
 def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space, enable_curiosity: bool) -> torch.Tensor:
     condensed_qs = []
     one_hot_actions = actions_to_onehot(actions, action_space)
-    if enable_curiosity:
-        for i in range(2):
-            branched_q1 = break_into_branches(q_out[:, :, i], action_space)
-            only_qs = torch.stack([torch.sum(act_branch * q_branch, dim=1, keepdim=True) for act_branch, q_branch in
-                         zip(one_hot_actions, branched_q1)])
-            cond_q = torch.mean(only_qs, dim=0)
-            condensed_qs.append(cond_q)
-    else:
-        for i in range(1):
-            branched_q1 = break_into_branches(q_out[:,:, i], action_space)
-            only_qs = torch.stack([torch.sum(act_branch * q_branch, dim=1, keepdim=True) for act_branch, q_branch in
-                         zip(one_hot_actions, branched_q1)])
-            cond_q = torch.mean(only_qs, dim=0)
-            condensed_qs.append(cond_q)
+    k = 2 if enable_curiosity else 1
+    for i in range(k):
+        branched_q1 = break_into_branches(q_out[:, :, i], action_space)
+        only_qs = torch.stack([torch.sum(act_branch * q_branch, dim=1, keepdim=True) for act_branch, q_branch in
+                     zip(one_hot_actions, branched_q1)])
+        cond_q = torch.mean(only_qs, dim=0)
+        condensed_qs.append(cond_q)
+
     return condensed_qs
 
 def get_probs_and_entropies(acts: torch.FloatTensor, dists: List[torch.distributions.Categorical], device):
@@ -157,7 +151,7 @@ class ActionFlattener:
 
 
 def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int, random_agent: int, random_target: int,
-                   agent_x: int = 0, agent_z: int = 0, target_x: int = 1, target_z: int = 1, enable_heatmap: bool = True, base_port: int = 5000) -> UnityEnvironment:
+                   agent_x: int = 0, agent_z: int = 0, target_x: int = 1, target_z: int = 1, enable_heatmap: bool = True, enable_sight_cone: bool = True, base_port: int = 5000) -> UnityEnvironment:
 
     engine_configuration_channel = EngineConfigurationChannel()
     engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
@@ -172,7 +166,7 @@ def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int
     env_parameters_channel.set_float_parameter("random_agent", float(random_agent))
     env_parameters_channel.set_float_parameter("random_target", float(random_target))
     env_parameters_channel.set_float_parameter("enable_heatmap", float(enable_heatmap))
-
+    env_parameters_channel.set_float_parameter("enable_sight_cone", float(enable_sight_cone))
 
     env = UnityEnvironment(file_name=env_path,
                            base_port=base_port, timeout_wait=120,

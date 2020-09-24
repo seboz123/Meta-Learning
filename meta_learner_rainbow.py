@@ -42,7 +42,7 @@ class Rainbow_Meta_Learner:
     def get_default_hyperparameters(self):
         hyperparameters = {}
         hyperparameters['Algorithm'] = "RAINBOW"
-        hyperparameters['logging_period'] = 2000
+        hyperparameters['logging_period'] = 10000
 
         hyperparameters['enable_curiosity'] = True
         hyperparameters['curiosity_lambda'] = 10    # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
@@ -504,7 +504,7 @@ class Rainbow_Meta_Learner:
 
 if __name__ == '__main__':
 
-    run_id = "results/dqn_1"
+    run_id = "results/dqn_0"
 
     writer = SummaryWriter(run_id)
 
@@ -517,37 +517,10 @@ if __name__ == '__main__':
 
     dqn_module = Rainbow_Meta_Learner(device=device, writer=writer, is_meta_learning=False)
 
-    env = init_unity_env("mMaze.app", maze_rows=2, maze_cols=2, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=0, target_z=1)
+    env = init_unity_env("mMaze/RLProject.exe", maze_rows=2, maze_cols=2, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=0, target_z=1, enable_sight_cone=True)
 
     ############ Hyperparameters DQN ##############
     training_parameters = dqn_module.get_default_hyperparameters()
-
-    training_parameters['Algorithm'] = "RAINBOW"
-    training_parameters['run_id'] = run_id
-    training_parameters['enable_curiosity'] = False
-
-
-    training_parameters['max_steps'] = 100000       # Maximum Training steps
-    training_parameters['buffer_size'] = 5000       # Replay buffer size
-    training_parameters['steps_per_update'] = 12    # Number of env steps to equal an update step
-    training_parameters['learning_rate'] = 0.0003   # Typical range: 0.00001 - 0.001
-    training_parameters['batch_size'] = 512         # Typical range: 32-512
-    training_parameters['hidden_layers'] = 2        # Number of hidden layers
-    training_parameters['layer_size'] = 256         # Hidden units
-    training_parameters['time_horizon'] = 128       # Time Horizon
-    training_parameters['gamma'] = 0.99             # Discount Factor
-    training_parameters['decay_lr'] = True          # Whether to decay lr
-
-    ### DQN specific
-
-    training_parameters['epsilon'] = 0.00          # Exploration vs Exploitation Percentage to explore. epsilon = 0 -> No exploring is decaying to zero after half of training steps
-    training_parameters['v_max'] = 13              # Maximum Value of Reward
-    training_parameters['v_min'] = -13             # Minimum Value of Reward
-    training_parameters['atom_size'] = 51          # Atom Size for categorical DQN
-    training_parameters['update_period'] = 50      # Period after which Target Network gets updated
-    training_parameters['beta'] = 0.6              # How much to use importance sampling
-    training_parameters['alpha'] = 0.2             # How much to use prioritization
-    training_parameters['prior_eps'] = 1e-6        # Guarantee to use all experiences
 
     dqn_module.set_env_and_detect_spaces(env, task=0)
 

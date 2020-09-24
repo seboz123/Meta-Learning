@@ -321,3 +321,42 @@ class DeepQNetwork(nn.Module):
         self.advantage_layer.reset_noise()
         self.value_hidden_layer.reset_noise()
         self.value_layer.reset_noise()
+
+class TorchNetworks:
+    def __init__(self, hyperparameters: {}, obs_dim, act_dim, device):
+        hidden_size = hyperparameters['layer_size']
+        num_hidden_layers = hyperparameters['hidden_layers']
+        init_entropy_coeff = hyperparameters['init_coeff']
+        adaptive_ent_coeff = hyperparameters['adaptive_coeff']
+
+        self.device = device
+        self.discrete_target_entropy_scale = 0.2
+        self.init_entropy_coeff = init_entropy_coeff
+
+        ### Actor Critic Policy Network ####
+        self.policy_network = ActorCriticPolicy(obs_dim, act_dim, hyperparameters, False).to(device)  # Pi
+        ### Value Network of Policy ######
+        ### Contains 2x Q-Networks ######
+        self.value_network = PolicyValueNetwork(obs_dim, act_dim, hidden_size, num_hidden_layers, hyperparameters['enable_curiosity']).to(
+            device)  # Q
+        ### Target Value Network ####
+        self.target_network = ValueNetwork(obs_dim, 1, hidden_size, num_hidden_layers, hyperparameters['enable_curiosity']).to(device)  # V
+
+        self.soft_update(self.policy_network, self.target_network, 1.0)
+        self.use_adaptive_entropy_coeff = adaptive_ent_coeff
+        if adaptive_ent_coeff:
+            self.log_entropy_coeff = torch.nn.Parameter(
+                torch.log(torch.as_tensor([self.init_entropy_coeff] * len(act_dim))).to(device),
+                requires_grad=True
+            ).to(device)
+        else:
+            self.log_entropy_coeff = torch.log(torch.as_tensor([self.init_entropy_coeff] * len(act_dim))).to(device)
+
+        self.target_entropy = [self.discrete_target_entropy_scale * np.log(i).astype(np.float32) for i in act_dim]
+
+        # self.policy_params = list(self.policy_network.parameters())
+        # self.value_params = list(self.value_network.parameters())
+
+    def soft_update(self, source: nn.Module, target: nn.Module, tau: float):
+        for source_param, target_param in zip(source.parameters(), target.parameters()):
+            target_param.data.copy_(target_param.data * (1.0 - tau) + source_param.data * tau)

@@ -32,20 +32,29 @@ class MetaLearner():
 
     def sample_task_from_distribution(self, task_distribution: list):
         sampled_size = np.where(np.random.multinomial(1, task_distribution) == 1)[0] + 2
-        target_x = np.random.randint(0, sampled_size)
-        target_z = np.random.randint(0, sampled_size)
+        pos_x = np.random.randint(0, 2)
+        pos_z = np.random.randint(0, 2)
 
-        agent_x = np.random.randint(0, sampled_size)
-        agent_z = np.random.randint(0, sampled_size)
+        target_x =  pos_x * sampled_size
+        target_z = pos_z * sampled_size
+
+        agent_x = 0
+        agent_z = 0
 
         if agent_z == agent_x and agent_x == target_x and target_x == target_z:
             task, task_number = self.sample_task_from_distribution(task_distribution)
         else:
 
             task = init_unity_env('mMaze.app', maze_seed=0, maze_rows=sampled_size, maze_cols=sampled_size, random_target=0,
-                              random_agent=0, agent_x=agent_x, agent_z=agent_z, target_x=target_x, target_z=target_z, enable_heatmap=True)
+                              random_agent=0, agent_x=agent_x, agent_z=agent_z, target_x=target_x, target_z=target_z, enable_heatmap=True, enable_sight_cone=True)
 
-            task_number = 0
+            task_number = sampled_size*10
+            if pos_x == 1 and pos_z == 1:
+                task_number += 2
+            elif pos_x == 1:
+                task_number += 1
+            elif pos_z == 1:
+                task_number += 3
 
         return task, task_number
 
@@ -110,8 +119,6 @@ class MetaLearner():
             for key in theta_before_state_dicts[0]:
                 print(theta_before_state_dicts[0][key])
                 break
-
-            losses = learner.train(hyperparameters)
 
             networks_after = deepcopy(learner.get_networks_and_parameters()['networks'])
             theta_after_state_dicts = [network.state_dict() for network in networks_after]
