@@ -32,10 +32,7 @@ class MetaLearner:
         self.learner = learner
 
     def sample_task_from_distribution(self, learner_type: str, task_distribution: list):
-        print(task_distribution)
-        sampled_size = np.where(np.random.multinomial(1, task_distribution) == 1)[0] + 2
-
-        print(sampled_size)
+        sampled_size = np.where(np.random.multinomial(1, task_distribution) == 1)[0][0] + 2
 
         pos_x = np.random.randint(0, 2)
         pos_z = np.random.randint(0, 2)
@@ -67,9 +64,7 @@ class MetaLearner:
             elif pos_z == 1:
                 task_number += 3
 
-            print(task_number)
-            print(task_number[0])
-        return task, task_number[0]
+        return task, task_number
 
     def print_weights(self, weight: dict):
         for i, key in enumerate(weight):
@@ -85,26 +80,55 @@ class MetaLearner:
         if learner_algorithm == 'rainbow':
             hyperparameters = self.learner.get_default_hyperparameters()
             hyperparameters['buffer_size'] = 20000
-            hyperparameters['max_steps'] = 100000
+            hyperparameters['batch_size'] = 1024
+
+            hyperparameters['max_steps'] = 400000
             hyperparameters['time_horizon'] = 512
-            hyperparameters['decay_lr'] = True
+            hyperparameters['decay_lr'] = False
             hyperparameters['learning_rate'] = 0.0003
-            hyperparameters['task_distribution'] = [0.7, 0.2, 0.1]
+            hyperparameters['task_distribution'] = [1, 0.0, 0.0]
             hyperparameters['num_meta_updates'] = num_meta_updates
             hyperparameters['Meta Learning Rate'] = meta_lr
             hyperparameters['Meta Algorithm'] = meta_algorithm
+            hyperparameters['Meta Optimizer'] = meta_optimizer
 
-            self.writer.add_text("Hyperparameters", str(hyperparameters))
+            hyperparameters['epsilon'] = 0  # Percentage to explore epsilon = 0 -> Decaying after half training
+            hyperparameters['v_max'] = 15  # Maximum Value of Reward
+            hyperparameters['v_min'] = -25  # Minimum Value of Reward
+            hyperparameters['atom_size'] = 51  # Atom Size for categorical DQN
+            hyperparameters['update_period'] = 30  # Period after which Target Network gets updated
+            hyperparameters['beta'] = 0.5  # How much to use importance sampling
+            hyperparameters['alpha'] = 0.1  # How much to use prioritization
+            hyperparameters['prior_eps'] = 1e-6  # Guarantee to use all experiences
+
+            hyperparameters['enable_curiosity'] = False
+            hyperparameters['curiosity_lambda'] = 10  # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
+            hyperparameters['curiosity_beta'] = 0.2  # Factor for using more of forward loss or more of inverse loss
+            hyperparameters['curiosity_enc_size'] = 32  # Encoding size of curiosity_module
+            hyperparameters['curiosity_layers'] = 2  # Layers of Curiosity Modules
+            hyperparameters['curiosity_units'] = 128  # Number of hidden units for curiosity modules
+
+            hypers_text = [str(key)+": "+str(hyperparameters[key]) for key in hyperparameters]
+            hypers_text = '  \n'.join(hypers_text)
+            self.writer.add_text("Meta-Hyperparameters", hypers_text, 0)
+
             print("Meta-Hyperparameters:")
             for key in hyperparameters:
                 print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
 
             updated_parameters = None
-            for meta_step in range(hyperparameters['num_meta_updates']):
+            for meta_step in range(num_meta_updates):
                 meta_start = time.time()
                 print("Meta step: {} of {}".format(meta_step, num_meta_updates))
 
-                task, task_number = self.sample_task_from_distribution(hyperparameters['task_distribution'])
+                # task, task_number = self.sample_task_from_distribution(learner_algorithm, hyperparameters['task_distribution'])
+
+                task = init_unity_env('mMaze/RLProject.exe', maze_seed=0, maze_rows=2,
+                                      maze_cols=2,
+                                      random_target=0, random_agent=0, agent_x=0, agent_z=0,
+                                      target_x=1,
+                                      target_z=0, enable_heatmap=True, enable_sight_cone=True)
+                task_number = 21
 
                 hyperparameters['learning_rate'] = hyperparameters['learning_rate'] * (1 - meta_step / num_meta_updates)
 
@@ -138,6 +162,8 @@ class MetaLearner:
                 networks_before = deepcopy(self.learner.get_networks_and_parameters()['networks'])
                 theta_before_state_dicts = [network.state_dict() for network in networks_before]
 
+                self.learner.train(run_id, hyperparameters)
+
                 print("Before Meta step network weights:")
                 for key in theta_before_state_dicts[0]:
                     print(theta_before_state_dicts[0][key])
@@ -151,34 +177,32 @@ class MetaLearner:
                     print(theta_after_state_dicts[0][key])
                     break
 
+                self.meta_optimizer.zero_grad()
                 if meta_algorithm == 'reptile':
                     print("Performing reptile meta update!")
                     # Set Theta - W as gradient to step with ADAM
-                    self.meta_optimizer.zero_grad()
                     for network_before, network_after in zip(networks_before,
                                                              self.learner.get_networks_and_parameters()['networks']):
                         for parameter_before, parameter_after in zip(network_before.parameters(),
                                                                      network_after.parameters()):
                             parameter_after.grad = parameter_before.data - parameter_after.data
-                    self.meta_optimizer.step()
 
                 elif meta_algorithm == 'fomaml':
                     print("Performing First-Order MAML meta update!")
                     for networks_after, network_before in zip(self.learner.get_networks_and_parameters()['networks'],
                                                               networks_before):
                         network_before.load_state_dict(networks_after.state_dict())
-                    self.meta_optimizer.step()
 
                 elif meta_algorithm == 'somaml':
                     print("Performing Second-Order MAML meta update!")
                     for networks_after, network_before in zip(self.learner.get_networks_and_parameters()['networks'],
                                                               networks_before):
                         network_before.load_state_dict(networks_after.state_dict())
-
                 else:
                     print("Please enter a valid meta_algorithm: reptile, fomaml or somaml!")
                     exit(-1)
 
+                self.meta_optimizer.step()
                 print("After Meta step network weights")
                 for key in self.learner.get_networks_and_parameters()['networks'][0].state_dict():
                     print(self.learner.get_networks_and_parameters()['networks'][0].state_dict()[key])
@@ -188,15 +212,15 @@ class MetaLearner:
                 self.learner.meta_step += 1
                 self.learner.close_env()
 
-                self.meta_scheduler.step()
+                # self.meta_scheduler.step()
 
                 print("Meta update took {:.3f}s".format(time.time() - meta_start))
 
         elif learner_algorithm == 'ppo' or learner_algorithm == 'sac':
 
             if learner_algorithm == 'ppo':
-                hyperparameters = {'buffer_size': 40000, 'max_steps': 2000000, 'time_horizon': 512, 'decay_lr': False,
-                                   'learning_rate': 0.0003, 'batch_size': 1024, 'hidden_layers': 2, 'layer_size': 256,
+                hyperparameters = {'buffer_size': 50000, 'max_steps': 1000000, 'time_horizon': 512, 'decay_lr': True,
+                                   'learning_rate': 0.0003, 'batch_size': 2048, 'hidden_layers': 2, 'layer_size': 256,
                                    'task_distribution': [0.7, 0.2, 0.1], 'num_meta_updates': num_meta_updates,
                                    'Meta Learning Rate': meta_lr, 'Meta Algorithm': meta_algorithm,
                                    'Meta Optimizer': meta_optimizer}
@@ -205,10 +229,9 @@ class MetaLearner:
                                                 target_z=1, random_agent=0, random_target=0, maze_seed=0,
                                                 enable_heatmap=True, enable_sight_cone=True)
             elif learner_algorithm == 'sac':
-                hyperparameters = {'buffer_size': 20000, 'max_steps': 100000, 'time_horizon': 512,
-                                       'decay_lr': False, 'learning_rate': 0.0003, 'batch_size': 1024, 'hidden_layers': 2,
-                                       'layer_size': 256,
-                                       'task_distribution': [0.7, 0.2, 0.1], 'num_meta_updates': num_meta_updates,
+                hyperparameters = {'buffer_size': 500000, 'max_steps': 500000, 'time_horizon': 512,
+                                       'decay_lr': False, 'learning_rate': 0.0003, 'batch_size': 2048, 'hidden_layers': 2,
+                                       'layer_size': 256, 'task_distribution': [0.7, 0.2, 0.1], 'num_meta_updates': num_meta_updates,
                                        'Meta Learning Rate': meta_lr, 'Meta Algorithm': meta_algorithm,
                                        'Meta Optimizer': meta_optimizer}
                 self.learner.set_hyperparameters(hyperparameters)
@@ -229,7 +252,10 @@ class MetaLearner:
             elif meta_optimizer == 'sgd':
                 self.meta_optimizer = optim.SGD(chain(optimizer_params), lr=meta_lr)
 
-            self.writer.add_text("Hyperparameters", str(hyperparameters))
+            hypers_text = [str(key)+": "+str(hyperparameters[key]) for key in hyperparameters]
+            hypers_text = '  \n'.join(hypers_text)
+            self.writer.add_text("Meta-Hyperparameters", hypers_text, 0)
+
             print("Meta-Hyperparameters:")
             for key in hyperparameters:
                 print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
@@ -240,7 +266,7 @@ class MetaLearner:
                 meta_start = time.time()
                 print("Meta step: {} of {}".format(meta_step, num_meta_updates))
 
-                task, task_number = self.sample_task_from_distribution(learner_type, hyperparameters['task_distribution'])
+                # task, task_number = self.sample_task_from_distribution(learner_type, hyperparameters['task_distribution'])
                 self.learner.set_env_parameters(maze_rows=2, maze_cols=2, agent_x=0, agent_z=0, target_x=1,
                                                 target_z=0, random_agent=0, random_target=0, maze_seed=0,
                                                 enable_heatmap=True, enable_sight_cone=True)
@@ -321,9 +347,9 @@ if __name__ == '__main__':
     meta_optimizer = 'sgd'
     meta_optimizer = sys.argv[4]
     num_meta_updates = 100
-    num_meta_updates = sys.argv[5]
+    num_meta_updates = int(sys.argv[5])
     meta_lr = 0.01
-    meta_lr = sys.argv[6]
+    meta_lr = float(sys.argv[6])
 
     print("Current Run ID: " + run_id)
 
@@ -344,9 +370,9 @@ if __name__ == '__main__':
         learner = MLAgentsTrainer(run_id=run_id, rl_algorithm='sac')
     elif learner_type == 'rainbow':
         meta_writer = SummaryWriter("results/"+run_id+"_RBOW_INFO")
-        learner = Rainbow_Meta_Learner(writer=meta_writer, device=device, is_meta_learning=True)
+        learner = Rainbow_Meta_Learner(device=device, is_meta_learning=True)
     else:
         exit(-1)
 
     meta_learner = MetaLearner(learner, meta_writer, run_id, device)
-    meta_learner.meta_learn(learner_type, meta_learn_algorithm, meta_optimizer, num_meta_updates=100, meta_lr=0.1)
+    meta_learner.meta_learn(learner_type, meta_learn_algorithm, meta_optimizer, num_meta_updates=num_meta_updates, meta_lr=meta_lr)

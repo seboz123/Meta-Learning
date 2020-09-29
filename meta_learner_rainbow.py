@@ -4,7 +4,7 @@ import time
 import torch
 import torch.optim as optim
 
-from typing import Dict, List
+from typing import Dict
 
 from curiosity_module import CuriosityModule
 from torch.utils.tensorboard import SummaryWriter
@@ -26,12 +26,10 @@ class Rainbow_Meta_Learner:
     def __init__(
             self,
             device: str,
-            writer: SummaryWriter,
             is_meta_learning: bool
 
     ):
         self.device = device
-        self.writer = writer
 
         self.step = 0
         self.meta_step = 0
@@ -70,7 +68,7 @@ class Rainbow_Meta_Learner:
         hyperparameters['v_max'] = 13  # Maximum Value of Reward
         hyperparameters['v_min'] = -13  # Minimum Value of Reward
         hyperparameters['atom_size'] = 51  # Atom Size for categorical DQN
-        hyperparameters['update_period'] = 50  # Period after which Target Network gets updated
+        hyperparameters['update_period'] = 20  # Period after which Target Network gets updated
         hyperparameters['beta'] = 0.6  # How much to use importance sampling
         hyperparameters['alpha'] = 0.2  # How much to use prioritization
         hyperparameters['prior_eps'] = 1e-6  # Guarantee to use all experiences
@@ -385,8 +383,9 @@ class Rainbow_Meta_Learner:
     def close_env(self):
         self.env.close()
 
-    def train(self, hyperparameters: dict):
-        self.writer.add_text("Hyperparameters", str(hyperparameters))
+    def train(self, run_id: str, hyperparameters: dict):
+        self.step = 0
+        self.writer = SummaryWriter("results/"+run_id+"_step_"+str(self.meta_step))
         print("Started run with following hyperparameters:")
         for key in hyperparameters:
             print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
@@ -424,28 +423,22 @@ class Rainbow_Meta_Learner:
             self.step += steps_taken
 
             if self.step > logging_steps * hyperparameters['logging_period']:
+                self.writer.add_scalar("Environment/Cumulative Reward",
+                                       np.mean(mean_rewards), self.step)
+                self.writer.add_scalar("Environment/Episode Length",
+                                       np.mean(mean_episode_lengths), self.step)
                 if self.is_meta_learning:
-                    self.writer.add_scalar(
-                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/Rainbow Cumulative Reward",
+                    self.writer.add_scalar("Tasks/Task "+str(self.task)+r"/Cumulative Reward",
                         np.mean(mean_rewards), self.step)
-                    self.writer.add_scalar(
-                        'Task: ' + str(self.task) + r"/Meta Step: " + str(
-                            self.meta_step) + r"/Rainbow Mean Episode Lengths",
-                        np.mean(mean_episode_lengths), self.step)
-                else:
-                    self.writer.add_scalar(
-                        "Environment/Cumulative Reward", np.mean(mean_rewards), self.step)
-                    self.writer.add_scalar("Environment/Episode Length",
-                                           np.mean(mean_episode_lengths), self.step)
+
                 mean_rewards.clear()
                 mean_episode_lengths.clear()
 
-            ######### Update the model for every step taken ##########
-
+            # Update the model for every step taken
             frame_start = time.time()
             update_steps = 0
             while update_steps * steps_per_update < steps_taken:
-                print("Current update step: {} of {} steps".format(update_steps, steps_taken))
+                print("Current update step: {} of {} steps".format(update_steps*steps_per_update, steps_taken))
                 loss, elementwise_loss, indices, f_loss, i_loss = self.calc_loss(buffer, buffer_n, batch_size=batch_size, n_step=time_horizon)
 
                 if self.enable_curiosity:
@@ -475,32 +468,29 @@ class Rainbow_Meta_Learner:
                 update_steps += 1
             frame_end = time.time()
             print("Current Update rate = {} updates per second".format(steps_taken / (frame_end - frame_start)))
-            print("Current Loss: {:.3f} at step {} with learning rate of: {:.6f}".format(np.mean(losses), self.step, self.optimizer.param_groups[0]['lr']))
-            print("Current beta: {:.3f}\nCurrent eps: {:.3f}".format(self.beta, epsilon))
+            print("Current Loss: {:.3f} at step {} with learning rate of: {:.4f}".format(np.mean(losses), self.step, self.optimizer.param_groups[0]['lr']))
+            # print("Current beta: {:.3f}\nCurrent eps: {:.3f}".format(self.beta, epsilon))
 
-            ####### Increase beta for PER ########
+            # Increase beta for PER #
             self.beta = self.beta + self.step / max_steps * (1.0 - self.beta)
-            ####### Decrease epsilon ########
+            # Decrease epsilon #
             epsilon = max((1 - self.step * 2 / max_steps) * epsilon, 0)
 
-            if(hyperparameters['decay_lr']):
+            if hyperparameters['decay_lr']:
                 self.learning_rate_scheduler.step(epoch=self.step)
 
             if self.step > logging_steps * hyperparameters['logging_period']:
                 if self.is_meta_learning:
-                    self.writer.add_scalar('Meta Learning Parameters/Learning Rate', self.learning_rate_scheduler.get_lr()[0], self.meta_step)
-                    self.writer.add_scalar(
-                        'Task: ' + str(self.task) + r"/Meta Step: " + str(self.meta_step) + r"/Rainbow Value Loss",
-                        np.mean(losses), self.step)
+                    self.writer.add_scalar('Policy/Learning Rate', self.learning_rate_scheduler.get_lr()[0], self.step)
+                    self.writer.add_scalar("Losses/Value Loss", np.mean(losses), self.step)
+                    if hyperparameters['enable_curiosity']:
+                        pass
                 else:
                     self.writer.add_scalar('Policy/Learning Rate', self.learning_rate_scheduler.get_lr()[0], self.step)
                     self.writer.add_scalar("Losses/Value Loss",
                                            np.mean(losses), self.step)
                 losses.clear()
                 logging_steps += 1
-
-
-        return [loss]
 
 if __name__ == '__main__':
 

@@ -6,6 +6,7 @@ import json
 from mlagents import tf_utils
 import torch.optim as optim
 from itertools import chain
+import numpy as np
 from mlagents.trainers.settings import EnvironmentParameterSettings, Lesson, ConstantSettings
 
 logger = logging_util.get_logger(__name__)
@@ -18,14 +19,16 @@ class MLAgentsTrainer:
     def __init__(self, run_id: str, rl_algorithm: str):
         self.meta_step = 0
         self.run_id = run_id
+        self.rl_algorithm = rl_algorithm
+        base_port = str(np.random.randint(1000, 10000))
         if rl_algorithm == 'ppo':
             args = parser.parse_args(["C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\tools\\ppo.yaml",
                                       "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze\\RLProject.exe",
-                                      "--num-envs=4", "--torch", "--run-id=init", "--base-port=3000", "--force"])
+                                      "--num-envs=4", "--torch", "--run-id=init", "--base-port="+base_port, "--force"])
         elif rl_algorithm == 'sac':
             args = parser.parse_args(["C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\tools\\sac.yaml",
                                       "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze\\RLProject.exe",
-                                      "--num-envs=4", "--torch", "--run-id=init", "--base-port=3000", "--force"])
+                                      "--num-envs=4", "--torch", "--run-id=init", "--base-port="+base_port, "--force"])
         options = RunOptions.from_argparse(args)
         self.options = options
         # Get inital Networks and weights to Meta learn #
@@ -34,8 +37,8 @@ class MLAgentsTrainer:
         max_steps = self.options.behaviors['Brain'].max_steps
         time_horizon = self.options.behaviors['Brain'].time_horizon
         self.init_lr = self.options.behaviors['Brain'].hyperparameters.learning_rate
-        self.options.behaviors['Brain'].max_steps = 1000
-        self.options.behaviors['Brain'].time_horizon = 500
+        self.options.behaviors['Brain'].max_steps = 100
+        self.options.behaviors['Brain'].time_horizon = 50
         self.init_networks, self.init_params, _ = run_training(run_seed=0, options=self.options, init_networks=None,
                                                             meta_step=self.meta_step, task_number=0)
         self.options.behaviors['Brain'].max_steps = max_steps
@@ -55,6 +58,9 @@ class MLAgentsTrainer:
             self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule = self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule.CONSTANT
         else:
             self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule = self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule.LINEAR
+        if self.rl_algorithm == 'sac':
+            self.options.behaviors['Brain'].hyperparameters.buffer_init_steps = 8000
+            self.options.behaviors['Brain'].hyperparameters.init_entcoef = 0.3
 
     def set_env_parameters(self, maze_rows: int, maze_cols: int, agent_x: int, agent_z: int, target_x: int,
                            target_z: int,

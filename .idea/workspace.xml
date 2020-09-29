@@ -11,14 +11,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="960b84bd-6af4-4c55-afb2-b6cb4969d05a" name="Default Changelist" comment="Working SAC">
-      <change afterPath="$PROJECT_DIR$/mlagents_meta_learner.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/MetaLearner.py" beforeDir="false" afterPath="$PROJECT_DIR$/MetaLearner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mlagents-learner.py" beforeDir="false" afterPath="$PROJECT_DIR$/mlagents-learner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mlagents-learner_2.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/ppo-7.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/meta_learner_rainbow.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_rainbow.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlagents_meta_learner.py" beforeDir="false" afterPath="$PROJECT_DIR$/mlagents_meta_learner.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tools/ppo.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/tools/ppo.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/sac-7.yaml" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/tools/sac.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/tools/sac.yaml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -52,6 +49,7 @@
   </component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\tools" />
       <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results\meta_ppo_run" />
     </key>
     <key name="CopyFile.RECENT_KEYS">
@@ -59,7 +57,7 @@
       <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\tools" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.MetaLearner">
+  <component name="RunManager" selected="Python.MetaLearner-PPO">
     <configuration name="MLAGENTS-learner1" type="PythonConfigurationType" factoryName="Python" singleton="false">
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -102,7 +100,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="MetaLearner" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
+    <configuration name="MetaLearner-PPO" type="PythonConfigurationType" factoryName="Python">
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
@@ -115,7 +113,49 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
-      <option name="PARAMETERS" value="Meta_run_1 ppo reptile adam 100 0.01" />
+      <option name="PARAMETERS" value="Meta_ppo_4_fomaml ppo fomaml sgd 20 0.01" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="MetaLearner-RBW" type="PythonConfigurationType" factoryName="Python">
+      <module name="Meta-Learner" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="C:\Users\Sebastian\anaconda3\envs\mlagents-release-7\python.exe" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
+      <option name="PARAMETERS" value="Meta_rbw_4 rainbow reptile sgd 20 0.1" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="MetaLearner-SAC" type="PythonConfigurationType" factoryName="Python">
+      <module name="Meta-Learner" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="C:\Users\Sebastian\anaconda3\envs\mlagents-release-7\python.exe" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
+      <option name="PARAMETERS" value="Meta_sac_2 sac reptile sgd 20 0.1" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -187,7 +227,9 @@
       <method v="2" />
     </configuration>
     <list>
-      <item itemvalue="Python.MetaLearner" />
+      <item itemvalue="Python.MetaLearner-RBW" />
+      <item itemvalue="Python.MetaLearner-PPO" />
+      <item itemvalue="Python.MetaLearner-SAC" />
       <item itemvalue="Python.MLAGENTS-learner1" />
       <item itemvalue="Python.MLAGENTS-learner2" />
       <item itemvalue="Python.meta_learner_ppo" />
@@ -325,7 +367,14 @@
       <option name="project" value="LOCAL" />
       <updated>1600955489729</updated>
     </task>
-    <option name="localTasksCounter" value="18" />
+    <task id="LOCAL-00018" summary="Working Algos">
+      <created>1601331301643</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1601331301643</updated>
+    </task>
+    <option name="localTasksCounter" value="19" />
     <servers />
   </component>
   <component name="TodoView">
@@ -381,49 +430,54 @@
     <MESSAGE value="Working Algortihms, todo: reward of curiosity in rainbow" />
     <MESSAGE value="Working Algortihms" />
     <MESSAGE value="Added suppport for ml-agents package" />
-    <option name="LAST_COMMIT_MESSAGE" value="Added suppport for ml-agents package" />
+    <MESSAGE value="Working Algos" />
+    <option name="LAST_COMMIT_MESSAGE" value="Working Algos" />
   </component>
   <component name="WindowStateProjectService">
-    <state x="470" y="52" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1601331159004">
+    <state x="470" y="52" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1601414749150">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="470" y="52" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1601331159004" />
+    <state x="470" y="52" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1601414749150" />
+    <state x="796" y="102" key="#com.intellij.ide.macro.MacrosDialog" timestamp="1601331210065">
+      <screen x="0" y="0" width="1920" height="1040" />
+    </state>
+    <state x="796" y="102" key="#com.intellij.ide.macro.MacrosDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1601331210065" />
     <state x="740" y="275" key="FileChooserDialogImpl" timestamp="1601127867429">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="740" y="275" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1601127867429" />
-    <state width="1899" height="362" key="GridCell.Tab.0.bottom" timestamp="1601330168061">
+    <state width="1899" height="226" key="GridCell.Tab.0.bottom" timestamp="1601416183781">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="362" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1601330168061" />
-    <state width="1899" height="362" key="GridCell.Tab.0.center" timestamp="1601330168061">
+    <state width="1899" height="226" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1601416183781" />
+    <state width="1899" height="226" key="GridCell.Tab.0.center" timestamp="1601416183781">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="362" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1601330168061" />
-    <state width="1899" height="362" key="GridCell.Tab.0.left" timestamp="1601330168061">
+    <state width="1899" height="226" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1601416183781" />
+    <state width="1899" height="226" key="GridCell.Tab.0.left" timestamp="1601416183781">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="362" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1601330168061" />
-    <state width="1899" height="362" key="GridCell.Tab.0.right" timestamp="1601330168061">
+    <state width="1899" height="226" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1601416183781" />
+    <state width="1899" height="226" key="GridCell.Tab.0.right" timestamp="1601416183781">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="362" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1601330168061" />
-    <state width="1899" height="348" key="GridCell.Tab.1.bottom" timestamp="1601076310570">
+    <state width="1899" height="226" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1601416183781" />
+    <state width="1899" height="348" key="GridCell.Tab.1.bottom" timestamp="1601394463632">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="348" key="GridCell.Tab.1.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1601076310570" />
-    <state width="1899" height="348" key="GridCell.Tab.1.center" timestamp="1601076310570">
+    <state width="1899" height="348" key="GridCell.Tab.1.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1601394463632" />
+    <state width="1899" height="348" key="GridCell.Tab.1.center" timestamp="1601394463632">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="348" key="GridCell.Tab.1.center/0.0.1920.1040@0.0.1920.1040" timestamp="1601076310570" />
-    <state width="1899" height="348" key="GridCell.Tab.1.left" timestamp="1601076310570">
+    <state width="1899" height="348" key="GridCell.Tab.1.center/0.0.1920.1040@0.0.1920.1040" timestamp="1601394463632" />
+    <state width="1899" height="348" key="GridCell.Tab.1.left" timestamp="1601394463632">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="348" key="GridCell.Tab.1.left/0.0.1920.1040@0.0.1920.1040" timestamp="1601076310570" />
-    <state width="1899" height="348" key="GridCell.Tab.1.right" timestamp="1601076310570">
+    <state width="1899" height="348" key="GridCell.Tab.1.left/0.0.1920.1040@0.0.1920.1040" timestamp="1601394463632" />
+    <state width="1899" height="348" key="GridCell.Tab.1.right" timestamp="1601394463632">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="348" key="GridCell.Tab.1.right/0.0.1920.1040@0.0.1920.1040" timestamp="1601076310570" />
+    <state width="1899" height="348" key="GridCell.Tab.1.right/0.0.1920.1040@0.0.1920.1040" timestamp="1601394463632" />
     <state x="461" y="165" key="SettingsEditor" timestamp="1600884005181">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
@@ -432,14 +486,14 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state width="498" height="446" key="SwitcherDM/0.0.1920.1040@0.0.1920.1040" timestamp="1600274545155" />
-    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1600894064936">
+    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1601333869467">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1040@0.0.1920.1040" timestamp="1600894064936" />
-    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup" timestamp="1600036740057">
+    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1040@0.0.1920.1040" timestamp="1601333869467" />
+    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup" timestamp="1601386263565">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup/0.0.1920.1040@0.0.1920.1040" timestamp="1600036740057" />
+    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup/0.0.1920.1040@0.0.1920.1040" timestamp="1601386263565" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
