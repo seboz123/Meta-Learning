@@ -1,5 +1,6 @@
 import numpy as np
 import time
+import sys
 
 import torch
 import torch.optim as optim
@@ -43,26 +44,23 @@ class Rainbow_Meta_Learner:
         hyperparameters['logging_period'] = 10000
 
         hyperparameters['enable_curiosity'] = True
-        hyperparameters['curiosity_lambda'] = 10    # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
-        hyperparameters['curiosity_beta'] = 0.2     # Factor for using more of forward loss or more of inverse loss
+        hyperparameters['curiosity_lambda'] = 10  # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
+        hyperparameters['curiosity_beta'] = 0.2  # Factor for using more of forward loss or more of inverse loss
         hyperparameters['curiosity_enc_size'] = 32  # Encoding size of curiosity_module
-        hyperparameters['curiosity_layers'] = 2     # Layers of Curiosity Modules
-        hyperparameters['curiosity_units'] = 128    # Number of hidden units for curiosity modules
-
+        hyperparameters['curiosity_layers'] = 2  # Layers of Curiosity Modules
+        hyperparameters['curiosity_units'] = 128  # Number of hidden units for curiosity modules
 
         hyperparameters['max_steps'] = 1000000
         hyperparameters['learning_rate'] = 0.0003  # Typical range: 0.00001 - 0.001
         hyperparameters['batch_size'] = 512  # Typical range: 32-512
-        hyperparameters['hidden_layers'] = 2
+        hyperparameters['hidden_layers'] = 1
         hyperparameters['layer_size'] = 256
-        hyperparameters['time_horizon'] = 128
+        hyperparameters['time_horizon'] = 512
         hyperparameters['gamma'] = 0.99
         hyperparameters['decay_lr'] = True
 
-
         hyperparameters['buffer_size'] = 5000  # Replay buffer size
         hyperparameters['steps_per_update'] = 12
-
 
         hyperparameters['epsilon'] = 0.15  # Percentage to explore epsilon = 0 -> Decaying after half training
         hyperparameters['v_max'] = 13  # Maximum Value of Reward
@@ -101,16 +99,20 @@ class Rainbow_Meta_Learner:
         self.prior_eps = prior_eps
         self.gamma = gamma
 
-        self.dqn = DeepQNetwork(in_dim=self.obs_dim, out_dim=self.action_dim.n, hidden_size=hidden_size, num_hidden_layers=network_num_hidden_layers, atom_size=self.atom_size, support=self.support,
+        self.dqn = DeepQNetwork(in_dim=self.obs_dim, out_dim=self.action_dim.n, hidden_size=hidden_size,
+                                num_hidden_layers=network_num_hidden_layers, atom_size=self.atom_size,
+                                support=self.support,
                                 enable_curiosity=hyperparameters['enable_curiosity']).to(self.device)
-        self.dqn_target = DeepQNetwork(in_dim=self.obs_dim, out_dim=self.action_dim.n, hidden_size=hidden_size, num_hidden_layers=network_num_hidden_layers, atom_size=self.atom_size, support=self.support,
+        self.dqn_target = DeepQNetwork(in_dim=self.obs_dim, out_dim=self.action_dim.n, hidden_size=hidden_size,
+                                       num_hidden_layers=network_num_hidden_layers, atom_size=self.atom_size,
+                                       support=self.support,
                                        enable_curiosity=hyperparameters['enable_curiosity']).to(self.device)
 
         self.dqn_target.load_state_dict(self.dqn.state_dict())
         self.dqn_target.eval()
         self.optimizer = optim.Adam(self.dqn.parameters(), lr=learning_rate)
 
-        linear_schedule = lambda epoch: max((1 - epoch / max_scheduler_steps), 1e-6)
+        linear_schedule = lambda epoch: max((1 - epoch / max_scheduler_steps), 1e-5)
 
         self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=linear_schedule)
 
@@ -168,12 +170,11 @@ class Rainbow_Meta_Learner:
 
         return selected_action
 
-
-    def calc_loss(self, memory, memory_n, batch_size: int,n_step: int) -> [torch.Tensor, torch.Tensor, np.ndarray]:
+    def calc_loss(self, memory, memory_n, batch_size: int, n_step: int) -> [torch.Tensor, torch.Tensor, np.ndarray]:
         use_n_step = True if n_step > 1 else False
 
         samples = memory.sample_batch(batch_size=batch_size, beta=self.beta)
-        weights = torch_from_np(samples["weights"].reshape(-1, 1), self.device)
+        weights = torch_from_np(samples["weights"].reshape(-1, 1), self.device).clone()
 
         indices = samples["indices"]
         # 1-step Learning loss
@@ -194,7 +195,7 @@ class Rainbow_Meta_Learner:
             gamma = self.gamma ** n_step
             elementwise_loss_n_loss = self._compute_dqn_loss(samples, gamma)
 
-            elementwise_loss += elementwise_loss_n_loss
+            elementwise_loss = elementwise_loss + elementwise_loss_n_loss
 
             # PER: importance sampling before average
             loss = torch.mean(elementwise_loss * weights)
@@ -245,7 +246,6 @@ class Rainbow_Meta_Learner:
                                           'rews_buf': np.zeros([max_trajectory_length], dtype=np.float32),
                                           'done_buf': np.zeros([max_trajectory_length], dtype=np.float32)}
 
-
                     for agent_id_decisions in decision_steps:
                         init_state = decision_steps[agent_id_decisions].obs
                         init_state = flatten(init_state)
@@ -280,20 +280,20 @@ class Rainbow_Meta_Learner:
                 if not done:  # If the corresponding agent is not done yet, select and action and continue
                     agent_ptr[agent_id] += 1
                     transitions[agent_id]['obs_buf'][agent_ptr[agent_id]] = next_obs
-                    next_action = int(self.select_action(next_obs, epsilon,self.device))  # Action of next step
+                    next_action = int(self.select_action(next_obs, epsilon, self.device))  # Action of next step
                     actions[agent_id] = next_action
                     transitions[agent_id]['acts_buf'][agent_ptr[agent_id]] = next_action
                 else:  # If the corresponding agent is done, store the trajectory into obs_buf, rews_buf...
-                    next_action = int(self.select_action(next_obs, epsilon,self.device))
+                    next_action = int(self.select_action(next_obs, epsilon, self.device))
                     actions[agent_id] = next_action
                     cumulative_rewards.append(sum(transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1]))
                     trajectory_lengths.append(agent_ptr[agent_id])
 
-                    obs_buf = transitions[agent_id]['obs_buf'][:agent_ptr[agent_id] +1]
-                    acts_buf = transitions[agent_id]['acts_buf'][:agent_ptr[agent_id] +1]
-                    rews_buf = transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] +1]
-                    n_obs_buf = transitions[agent_id]['n_obs_buf'][:agent_ptr[agent_id] +1]
-                    done_buf = transitions[agent_id]['done_buf'][:agent_ptr[agent_id] +1]
+                    obs_buf = transitions[agent_id]['obs_buf'][:agent_ptr[agent_id] + 1]
+                    acts_buf = transitions[agent_id]['acts_buf'][:agent_ptr[agent_id] + 1]
+                    rews_buf = transitions[agent_id]['rews_buf'][:agent_ptr[agent_id] + 1]
+                    n_obs_buf = transitions[agent_id]['n_obs_buf'][:agent_ptr[agent_id] + 1]
+                    done_buf = transitions[agent_id]['done_buf'][:agent_ptr[agent_id] + 1]
 
                     for i in range(agent_ptr[agent_id] + 1):  # For every experiences store it in buffer
                         transition = [obs_buf[i], acts_buf[i], rews_buf[i], n_obs_buf[i], done_buf[i]]
@@ -321,8 +321,6 @@ class Rainbow_Meta_Learner:
                     agent_ptr[agent_id] = 0
             first_iteration = False
 
-
-
         print("Mean Cumulative Reward: {} at step {}".format(np.mean(cumulative_rewards), self.step))
         print("Mean Episode Lengths: {} at step {}".format(np.mean(trajectory_lengths), self.step))
 
@@ -344,11 +342,11 @@ class Rainbow_Meta_Learner:
         with torch.no_grad():
             # Double DQN
             next_action = self.dqn(next_state).argmax(1)
-            next_dist = self.dqn_target.dist(next_state)
-            next_dist = next_dist[range(len(next_action)), next_action]
+            next_dis = self.dqn_target.dist(next_state)
+            next_dist = next_dis[range(len(next_action)), next_action]
 
-            t_z = reward + (1 - done) * gamma * self.support
-            t_z = t_z.clamp(min=self.v_min, max=self.v_max)
+            t_z_0 = reward + (1 - done) * gamma * self.support
+            t_z = t_z_0.clamp(min=self.v_min, max=self.v_max)
             b = (t_z - self.v_min) / delta_z
             l = b.floor().long()
             u = b.ceil().long()
@@ -385,7 +383,12 @@ class Rainbow_Meta_Learner:
 
     def train(self, run_id: str, hyperparameters: dict):
         self.step = 0
-        self.writer = SummaryWriter("results/"+run_id+"_step_"+str(self.meta_step))
+        self.writer = SummaryWriter("results/" + run_id + "_step_" + str(self.meta_step))
+
+        hypers_text = [str(key) + ": " + str(hyperparameters[key]) for key in hyperparameters]
+        hypers_text = '  \n'.join(hypers_text)
+        self.writer.add_text("Hyperparameters", hypers_text, 0)
+
         print("Started run with following hyperparameters:")
         for key in hyperparameters:
             print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
@@ -415,12 +418,15 @@ class Rainbow_Meta_Learner:
 
         while self.step < max_steps:
 
-            steps_taken, mean_reward, mean_episode_length = self.generate_and_fill_buffer(replay_buffer=buffer, n_replay_buffer=buffer_n, epsilon=epsilon)
+            steps_taken, mean_reward, mean_episode_length = self.generate_and_fill_buffer(replay_buffer=buffer,
+                                                                                          n_replay_buffer=buffer_n,
+                                                                                          epsilon=epsilon)
             print("Finished Buffer with {} steps taken".format(steps_taken))
 
             mean_rewards.append(mean_reward)
             mean_episode_lengths.append(mean_episode_length)
             self.step += steps_taken
+            target_update = 0
 
             if self.step > logging_steps * hyperparameters['logging_period']:
                 self.writer.add_scalar("Environment/Cumulative Reward",
@@ -428,8 +434,8 @@ class Rainbow_Meta_Learner:
                 self.writer.add_scalar("Environment/Episode Length",
                                        np.mean(mean_episode_lengths), self.step)
                 if self.is_meta_learning:
-                    self.writer.add_scalar("Tasks/Task "+str(self.task)+r"/Cumulative Reward",
-                        np.mean(mean_rewards), self.step)
+                    self.writer.add_scalar("Tasks/Task " + str(self.task) + r"/Cumulative Reward",
+                                           np.mean(mean_rewards), self.step)
 
                 mean_rewards.clear()
                 mean_episode_lengths.clear()
@@ -437,14 +443,17 @@ class Rainbow_Meta_Learner:
             # Update the model for every step taken
             frame_start = time.time()
             update_steps = 0
+
             while update_steps * steps_per_update < steps_taken:
-                print("Current update step: {} of {} steps".format(update_steps*steps_per_update, steps_taken))
-                loss, elementwise_loss, indices, f_loss, i_loss = self.calc_loss(buffer, buffer_n, batch_size=batch_size, n_step=time_horizon)
+                print("Current update step: {} of {} steps".format(update_steps * steps_per_update, steps_taken))
+                loss, elementwise_loss, indices, f_loss, i_loss = self.calc_loss(buffer, buffer_n,
+                                                                                 batch_size=batch_size,
+                                                                                 n_step=time_horizon)
 
                 if self.enable_curiosity:
                     curiosity_loss = hyperparameters['curiosity_lambda'] * (
                             hyperparameters['curiosity_beta'] * f_loss + (
-                                1 - hyperparameters['curiosity_beta']) * i_loss)
+                            1 - hyperparameters['curiosity_beta']) * i_loss)
                     self.curiosity.optimizer.zero_grad()
                     curiosity_loss.backward()
                     for network in self.curiosity.get_networks():
@@ -452,11 +461,12 @@ class Rainbow_Meta_Learner:
                     self.curiosity.optimizer.step()
                     self.curiosity.learning_rate_scheduler.step()
 
-                if update_steps % update_period == 0:
+                if target_update % update_period == 0:
                     self._target_hard_update()
 
                 self.optimizer.zero_grad()
                 loss.backward()
+
                 torch.nn.utils.clip_grad_norm_(self.dqn.parameters(), 10.0)
                 self.optimizer.step()
                 losses.append(loss.detach().cpu().numpy())
@@ -466,15 +476,16 @@ class Rainbow_Meta_Learner:
                 buffer.update_priorities(indices, new_priorities)
 
                 update_steps += 1
+                target_update += 1
             frame_end = time.time()
             print("Current Update rate = {} updates per second".format(steps_taken / (frame_end - frame_start)))
-            print("Current Loss: {:.3f} at step {} with learning rate of: {:.4f}".format(np.mean(losses), self.step, self.optimizer.param_groups[0]['lr']))
-            # print("Current beta: {:.3f}\nCurrent eps: {:.3f}".format(self.beta, epsilon))
-
+            print("Current Loss: {:.3f} at step {} with learning rate of: {}".format(np.mean(losses), self.step,
+                                                                                         self.optimizer.param_groups[0][
+                                                                                             'lr']))
             # Increase beta for PER #
             self.beta = self.beta + self.step / max_steps * (1.0 - self.beta)
             # Decrease epsilon #
-            epsilon = max((1 - self.step * 2 / max_steps) * epsilon, 0)
+            epsilon = max((1 - (self.step * 4) / max_steps) * epsilon, 0)
 
             if hyperparameters['decay_lr']:
                 self.learning_rate_scheduler.step(epoch=self.step)
@@ -492,9 +503,14 @@ class Rainbow_Meta_Learner:
                 losses.clear()
                 logging_steps += 1
 
+
 if __name__ == '__main__':
 
-    run_id = "results/dqn_0"
+    run_id = sys.argv[1]
+    buffer_size = int(sys.argv[2])
+    epsilon = float(sys.argv[3])
+    time_horizon = int(sys.argv[4])
+    alpha = float(sys.argv[5])
 
     writer = SummaryWriter(run_id)
 
@@ -502,17 +518,46 @@ if __name__ == '__main__':
     if device == 'cuda':
         print(torch.cuda.get_device_name(0))
         print('Memory Usage:')
-        print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
-        print('Cached:   ', round(torch.cuda.memory_cached(0)/1024**3,1), 'GB')
+        print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
+        print('Cached:   ', round(torch.cuda.memory_cached(0) / 1024 ** 3, 1), 'GB')
 
-    dqn_module = Rainbow_Meta_Learner(device=device, writer=writer, is_meta_learning=False)
+    dqn_module = Rainbow_Meta_Learner(device=device, is_meta_learning=False)
 
-    env = init_unity_env("mMaze/RLProject.exe", maze_rows=2, maze_cols=2, maze_seed=0, random_agent=0, random_target=0, agent_x=0, agent_z=0, target_x=0, target_z=1, enable_sight_cone=True)
+
+
+
+    env = init_unity_env("mMaze_dis_ref/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
+                         agent_x=0, agent_z=0, target_x=2, target_z=2, enable_sight_cone=True)
 
     ############ Hyperparameters DQN ##############
-    training_parameters = dqn_module.get_default_hyperparameters()
+    hyperparameters = dqn_module.get_default_hyperparameters()
+
+    hyperparameters['buffer_size'] = buffer_size
+    hyperparameters['batch_size'] = 1024
+
+    hyperparameters['max_steps'] = 500000
+    hyperparameters['time_horizon'] = time_horizon
+    hyperparameters['decay_lr'] = True
+    hyperparameters['learning_rate'] = 0.0003
+    hyperparameters['task_distribution'] = [1, 0.0, 0.0]
+
+    hyperparameters['epsilon'] = epsilon  # Percentage to explore epsilon = 0 -> Decaying after half training
+    hyperparameters['v_max'] = 15  # Maximum Value of Reward
+    hyperparameters['v_min'] = -15  # Minimum Value of Reward
+    hyperparameters['atom_size'] = 51  # Atom Size for categorical DQN
+    hyperparameters['update_period'] = 80  # Period after which Target Network gets updated
+    hyperparameters['beta'] = 0.4  # How much to use importance sampling
+    hyperparameters['alpha'] = alpha  # How much to use prioritization
+    hyperparameters['prior_eps'] = 1e-6  # Guarantee to use all experiences
+
+    hyperparameters['enable_curiosity'] = False
+    hyperparameters['curiosity_lambda'] = 10  # Weight factor of extrinsic reward. 0.1 -> 10*Curiosity
+    hyperparameters['curiosity_beta'] = 0.2  # Factor for using more of forward loss or more of inverse loss
+    hyperparameters['curiosity_enc_size'] = 32  # Encoding size of curiosity_module
+    hyperparameters['curiosity_layers'] = 2  # Layers of Curiosity Modules
+    hyperparameters['curiosity_units'] = 128  # Number of hidden units for curiosity modules
 
     dqn_module.set_env_and_detect_spaces(env, task=0)
 
-    dqn_module.init_networks_and_optimizers(training_parameters)
-    dqn_module.train(training_parameters)
+    dqn_module.init_networks_and_optimizers(hyperparameters)
+    dqn_module.train(run_id, hyperparameters)

@@ -282,6 +282,7 @@ class DeepQNetwork(nn.Module):
         self.value_hidden_layer = nn.Sequential(NoisyLinear(hidden_size, hidden_size), Swish())
         self.value_layer = NoisyLinear(hidden_size, atom_size)
 
+
         if enable_curiosity:
             self.curiosity_layer = nn.Linear(hidden_size, 1)
 
@@ -304,16 +305,19 @@ class DeepQNetwork(nn.Module):
         adv_hid = self.advantage_hidden_layer(feature)
         val_hid = self.value_hidden_layer(feature)
 
-        advantage = self.advantage_layer(adv_hid).view(
+        advantage = self.advantage_layer(adv_hid).reshape(
             -1, self.out_dim, self.atom_size
         )
-        value = self.value_layer(val_hid).view(-1, 1, self.atom_size)
-        q_atoms = value + advantage - advantage.mean(dim=1, keepdim=True)
+        value_o = self.value_layer(val_hid)
+
+        value = value_o.reshape(-1, 1, self.atom_size)
+
+        q_atoms = value + advantage - torch.mean(advantage, dim=1, keepdim=True)
 
         dist = F.softmax(q_atoms, dim=-1)
-        dist = dist.clamp(min=1e-3)  # for avoiding nans
+        dist_out = dist.clamp(min=1e-3)  # for avoiding nans
 
-        return dist
+        return dist_out
 
     def reset_noise(self):
         """Reset all noisy layers."""

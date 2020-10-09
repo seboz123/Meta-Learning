@@ -77,7 +77,7 @@ import torch
 import torch.nn as nn
 
 # simply define a silu function
-def swish(input, beta: float = 1):
+def swish(input, beta: float = 0.8):
     '''
     Applies the Sigmoid Linear Unit (SiLU) function element-wise:
         SiLU(x) = x * sigmoid(x)

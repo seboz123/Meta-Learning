@@ -4,8 +4,6 @@ from mlagents.trainers.cli_utils import parser
 from mlagents_envs import logging_util
 import json
 from mlagents import tf_utils
-import torch.optim as optim
-from itertools import chain
 import numpy as np
 from mlagents.trainers.settings import EnvironmentParameterSettings, Lesson, ConstantSettings
 
@@ -23,12 +21,13 @@ class MLAgentsTrainer:
         base_port = str(np.random.randint(1000, 10000))
         if rl_algorithm == 'ppo':
             args = parser.parse_args(["C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\tools\\ppo.yaml",
-                                      "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze\\RLProject.exe",
-                                      "--num-envs=4", "--torch", "--run-id=init", "--base-port="+base_port, "--force"])
+                                      "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze_cont10\\RLProject.exe",
+                                      "--num-envs=5", "--torch", "--run-id=init", "--base-port="+base_port, "--force",
+                                      "--seed=5", "--force"])
         elif rl_algorithm == 'sac':
             args = parser.parse_args(["C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\tools\\sac.yaml",
-                                      "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze\\RLProject.exe",
-                                      "--num-envs=4", "--torch", "--run-id=init", "--base-port="+base_port, "--force"])
+                                      "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze_cont3\\RLProject.exe",
+                                      "--num-envs=6", "--run-id=init", "--base-port="+base_port, "--force", "--torch"])
         options = RunOptions.from_argparse(args)
         self.options = options
         # Get inital Networks and weights to Meta learn #
@@ -39,7 +38,7 @@ class MLAgentsTrainer:
         self.init_lr = self.options.behaviors['Brain'].hyperparameters.learning_rate
         self.options.behaviors['Brain'].max_steps = 100
         self.options.behaviors['Brain'].time_horizon = 50
-        self.init_networks, self.init_params, _ = run_training(run_seed=0, options=self.options, init_networks=None,
+        self.train_networks, self.init_params, _ = run_training(run_seed=0, options=self.options, init_networks=None,
                                                             meta_step=self.meta_step, task_number=0)
         self.options.behaviors['Brain'].max_steps = max_steps
         self.options.behaviors['Brain'].time_horizon = time_horizon
@@ -49,7 +48,6 @@ class MLAgentsTrainer:
         self.options.behaviors['Brain'].hyperparameters.buffer_size = hyperparameters['buffer_size']
         self.options.behaviors['Brain'].hyperparameters.batch_size = hyperparameters['batch_size']
         self.options.behaviors['Brain'].hyperparameters.learning_rate = hyperparameters['learning_rate']
-        # self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule = learning_rate_schedule
         self.options.behaviors['Brain'].time_horizon = hyperparameters['time_horizon']
         self.options.behaviors['Brain'].network_settings.hidden_units = hyperparameters['layer_size']
         self.options.behaviors['Brain'].network_settings.num_layers = hyperparameters['hidden_layers']
@@ -58,12 +56,12 @@ class MLAgentsTrainer:
             self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule = self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule.CONSTANT
         else:
             self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule = self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule.LINEAR
-        if self.rl_algorithm == 'sac':
-            self.options.behaviors['Brain'].hyperparameters.buffer_init_steps = 8000
-            self.options.behaviors['Brain'].hyperparameters.init_entcoef = 0.3
+        # if self.rl_algorithm == 'sac':
+        #     self.options.behaviors['Brain'].hyperparameters.buffer_init_steps = 8000
+        #     self.options.behaviors['Brain'].hyperparameters.init_entcoef = 0.3
 
     def set_env_parameters(self, maze_rows: int, maze_cols: int, agent_x: int, agent_z: int, target_x: int,
-                           target_z: int,
+                           target_z: int, agent_rot: float,
                            random_agent: int, random_target: int, maze_seed: int, enable_sight_cone: bool,
                            enable_heatmap: bool):
         self.options.environment_parameters['maze_rows'] = EnvironmentParameterSettings(
@@ -74,6 +72,8 @@ class MLAgentsTrainer:
             [Lesson(ConstantSettings(seed=0, value=float(agent_x)), "agent_x", completion_criteria=None)])
         self.options.environment_parameters['agent_z'] = EnvironmentParameterSettings(
             [Lesson(ConstantSettings(seed=0, value=float(agent_z)), "agent_z", completion_criteria=None)])
+        self.options.environment_parameters['agent_rot'] = EnvironmentParameterSettings(
+            [Lesson(ConstantSettings(seed=0, value=float(agent_rot)), "agent_rot", completion_criteria=None)])
         self.options.environment_parameters['target_x'] = EnvironmentParameterSettings(
             [Lesson(ConstantSettings(seed=0, value=float(target_x)), "target_x", completion_criteria=None)])
         self.options.environment_parameters['target_z'] = EnvironmentParameterSettings(
@@ -84,6 +84,7 @@ class MLAgentsTrainer:
             [Lesson(ConstantSettings(seed=0, value=float(random_target)), "random_target", completion_criteria=None)])
         self.options.environment_parameters['maze_seed'] = EnvironmentParameterSettings(
             [Lesson(ConstantSettings(seed=0, value=float(maze_seed)), "maze_seed", completion_criteria=None)])
+
         if enable_heatmap:
             self.options.environment_parameters['enable_heatmap'] = EnvironmentParameterSettings(
                 [Lesson(ConstantSettings(seed=0, value=1.0), "enable_heatmap", completion_criteria=None)])
@@ -97,15 +98,15 @@ class MLAgentsTrainer:
             self.options.environment_parameters['enable_sight_cone'] = EnvironmentParameterSettings(
                 [Lesson(ConstantSettings(seed=0, value=0.0), "enable_sight_cone", completion_criteria=None)])
 
-    def train(self, task_number: int, run_id: str = "ppo_", init_networks=None):
+    def train(self, task_number: int, run_id: str = "ppo_", init_networks=None, meta_eval=False):
         self.options.checkpoint_settings.run_id = run_id + "_step_"+str(self.meta_step)
         print(self.options.checkpoint_settings.run_id)
         logger.debug("Configuration for this run:")
         logger.debug(json.dumps(self.options.as_dict(), indent=4))
-        trained_networks, trained_parameters, losses = run_training(run_seed=0, options=self.options,
-                                                            init_networks=init_networks, meta_step=self.meta_step, task_number=task_number)
-        return trained_networks, trained_parameters, losses
-
-if __name__ == '__main__':
-    ml_trainer = MLAgentsTrainer(run_id="Meta_SAC_", meta_lr=0.8, meta_optimizer='SGD', rl_algorithm='ppo')
-    ml_trainer.meta_learn(algorithm='fomaml', num_meta_updates=100)
+        if self.options.env_settings.seed == -1:
+            run_seed = np.random.randint(0, 10000)
+        else:
+            run_seed = self.options.env_settings.seed
+        trained_networks, trained_parameters, meta_loss = run_training(run_seed=run_seed,options=self.options, init_networks=init_networks, meta_step=self.meta_step, task_number=task_number, meta_eval=meta_eval)
+        # run_training(run_seed=run_seed, options=self.options)
+        return trained_networks, trained_parameters, meta_loss

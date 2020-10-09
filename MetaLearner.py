@@ -30,41 +30,43 @@ class MetaLearner:
         self.device = device
         self.run_id = run_id
         self.learner = learner
+        seed_torch(0)
 
-    def sample_task_from_distribution(self, learner_type: str, task_distribution: list):
-        sampled_size = np.where(np.random.multinomial(1, task_distribution) == 1)[0][0] + 2
+    def sample_task_from_distribution(self, learner_type: str):
 
-        pos_x = np.random.randint(0, 2)
-        pos_z = np.random.randint(0, 2)
+        difficulties = [2, 2, 4, 4, 6]
+        # Maze size, seed
+        mazes = [[2, 0], [2, 2], [3, 0], [3, 2], [3, 4]]
+        sum = np.sum(difficulties)
+        probs_unscaled = []
+        for difficulty in difficulties:
+            probs_unscaled.append((difficulty / sum) ** -1)
+        prob_sum = np.sum(probs_unscaled)
+        probs_scaled = []
+        for prob in probs_unscaled:
+            probs_scaled.append(prob / prob_sum)
 
-        target_x = pos_x * (sampled_size-1)
-        target_z = pos_z * (sampled_size-1)
+        print(probs_scaled)
+        sampled_task = np.where(np.random.multinomial(1, probs_scaled) == 1)[0][0]
+        print(sampled_task)
 
-        agent_x = 0
-        agent_z = 0
+        maze = mazes[sampled_task]
 
-        if agent_z == agent_x and agent_x == target_x and target_x == target_z:
-            task, task_number = self.sample_task_from_distribution(learner_type, task_distribution)
+        if learner_type == 'rainbow':
+            task = init_unity_env('mMaze/RLProject.exe', maze_seed=maze[1], maze_rows=maze[0],
+                                  maze_cols=maze[0],
+                                  random_target=0, random_agent=0, agent_x=0, agent_z=0,
+                                  target_x=maze[1]-1, agent_rot=0,
+                                  target_z=maze[1]-1, enable_heatmap=True, enable_sight_cone=True)
+            return task, sampled_task
         else:
-            if learner_type == 'rainbow':
-                task = init_unity_env('mMaze/RLProject.exe', maze_seed=0, maze_rows=sampled_size, maze_cols=sampled_size,
-                                      random_target=0, random_agent=0, agent_x=agent_x, agent_z=agent_z, target_x=target_x,
-                                      target_z=target_z, enable_heatmap=True, enable_sight_cone=True)
-            else:
-                self.learner.set_env_parameters(maze_rows=sampled_size, maze_cols=sampled_size, agent_x=agent_x, agent_z=agent_z, target_x=target_x,
-                                                target_z=target_z, random_agent=0, random_target=0, maze_seed=0,
-                                                enable_heatmap=True, enable_sight_cone=True)
-                task = None
-            task_number = sampled_size * 10
-            print(task_number)
-            if pos_x == 1 and pos_z == 1:
-                task_number += 2
-            elif pos_x == 1:
-                task_number += 1
-            elif pos_z == 1:
-                task_number += 3
+            self.learner.set_env_parameters(maze_seed=maze[1], maze_rows=maze[0],
+                                  maze_cols=maze[0],
+                                  random_target=0, random_agent=0, agent_x=0, agent_z=0,
+                                  target_x=maze[1]-1, agent_rot=0,
+                                  target_z=maze[1]-1, enable_heatmap=True, enable_sight_cone=True)
 
-        return task, task_number
+            return sampled_task
 
     def print_weights(self, weight: dict):
         for i, key in enumerate(weight):
@@ -72,19 +74,21 @@ class MetaLearner:
                 print(weight[key])
                 break
 
-    def meta_learn(self, learner_algorithm: str, meta_algorithm: str, meta_optimizer: str, num_meta_updates: int, meta_lr: float):
+    def meta_learn(self, learner_algorithm: str, meta_algorithm: str, meta_optimizer: str, num_meta_updates: int,
+                   meta_lr: float):
         start_time = time.localtime()
         start_time = time.strftime("%H:%M:%S", start_time)
         print("Meta Learning started at: " + start_time)
+        # torch.autograd.set_detect_anomaly(True)
 
         if learner_algorithm == 'rainbow':
             hyperparameters = self.learner.get_default_hyperparameters()
             hyperparameters['buffer_size'] = 20000
             hyperparameters['batch_size'] = 1024
 
-            hyperparameters['max_steps'] = 400000
-            hyperparameters['time_horizon'] = 512
-            hyperparameters['decay_lr'] = False
+            hyperparameters['max_steps'] = 1000000
+            hyperparameters['time_horizon'] = 3
+            hyperparameters['decay_lr'] = True
             hyperparameters['learning_rate'] = 0.0003
             hyperparameters['task_distribution'] = [1, 0.0, 0.0]
             hyperparameters['num_meta_updates'] = num_meta_updates
@@ -92,13 +96,13 @@ class MetaLearner:
             hyperparameters['Meta Algorithm'] = meta_algorithm
             hyperparameters['Meta Optimizer'] = meta_optimizer
 
-            hyperparameters['epsilon'] = 0  # Percentage to explore epsilon = 0 -> Decaying after half training
+            hyperparameters['epsilon'] = 0.2  # Percentage to explore epsilon = 0 -> Decaying after half training
             hyperparameters['v_max'] = 15  # Maximum Value of Reward
-            hyperparameters['v_min'] = -25  # Minimum Value of Reward
+            hyperparameters['v_min'] = -15  # Minimum Value of Reward
             hyperparameters['atom_size'] = 51  # Atom Size for categorical DQN
-            hyperparameters['update_period'] = 30  # Period after which Target Network gets updated
-            hyperparameters['beta'] = 0.5  # How much to use importance sampling
-            hyperparameters['alpha'] = 0.1  # How much to use prioritization
+            hyperparameters['update_period'] = 80  # Period after which Target Network gets updated
+            hyperparameters['beta'] = 0.4  # How much to use importance sampling
+            hyperparameters['alpha'] = 0.2  # How much to use prioritization
             hyperparameters['prior_eps'] = 1e-6  # Guarantee to use all experiences
 
             hyperparameters['enable_curiosity'] = False
@@ -108,7 +112,7 @@ class MetaLearner:
             hyperparameters['curiosity_layers'] = 2  # Layers of Curiosity Modules
             hyperparameters['curiosity_units'] = 128  # Number of hidden units for curiosity modules
 
-            hypers_text = [str(key)+": "+str(hyperparameters[key]) for key in hyperparameters]
+            hypers_text = [str(key) + ": " + str(hyperparameters[key]) for key in hyperparameters]
             hypers_text = '  \n'.join(hypers_text)
             self.writer.add_text("Meta-Hyperparameters", hypers_text, 0)
 
@@ -116,35 +120,24 @@ class MetaLearner:
             for key in hyperparameters:
                 print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
 
-            updated_parameters = None
             for meta_step in range(num_meta_updates):
                 meta_start = time.time()
                 print("Meta step: {} of {}".format(meta_step, num_meta_updates))
 
                 # task, task_number = self.sample_task_from_distribution(learner_algorithm, hyperparameters['task_distribution'])
-
-                task = init_unity_env('mMaze/RLProject.exe', maze_seed=0, maze_rows=2,
-                                      maze_cols=2,
+                task = init_unity_env('mMaze_dis_ref/RLProject.exe', maze_seed=0, maze_rows=3,
+                                      maze_cols=3,
                                       random_target=0, random_agent=0, agent_x=0, agent_z=0,
-                                      target_x=1,
-                                      target_z=0, enable_heatmap=True, enable_sight_cone=True)
-                task_number = 21
-
-                hyperparameters['learning_rate'] = hyperparameters['learning_rate'] * (1 - meta_step / num_meta_updates)
-
-                self.learner.set_env_and_detect_spaces(task, task_number)
-                self.learner.init_networks_and_optimizers(hyperparameters)
-
-                if updated_parameters is not None:
-                    print("Setting network parameters to updated parameters!")
-                    for network, updated_parameters in zip(self.learner.get_networks_and_parameters()['networks'],
-                                                           updated_parameters):
-                        network.load_state_dict(updated_parameters)
+                                      target_x=2,
+                                      target_z=2, enable_heatmap=True, enable_sight_cone=True)
+                # task_number = 200
+                self.learner.set_env_and_detect_spaces(task, 0)
 
                 if meta_step == 0:
-                    networks = self.learner.get_networks_and_parameters()['networks']
+                    self.learner.init_networks_and_optimizers(hyperparameters)
+                    self.train_networks = self.learner.get_networks_and_parameters()['networks']
                     optimizer_params = []
-                    for network in networks:
+                    for network in self.train_networks:
                         optimizer_params.extend(network.parameters())
                     if meta_optimizer == 'adam':
                         self.meta_optimizer = optim.Adam(chain(optimizer_params), lr=meta_lr)
@@ -153,96 +146,90 @@ class MetaLearner:
                     else:
                         print("Enter valid Meta optimizer")
                         exit(-1)
-                    exp_schedule = lambda epoch: max(0.99 ** epoch, 0.001)
-                    self.meta_scheduler = optim.lr_scheduler.LambdaLR(self.meta_optimizer, exp_schedule)
+                    # exp_schedule = lambda epoch: max(0.99 ** epoch, 0.001)
+                    # self.meta_scheduler = optim.lr_scheduler.LambdaLR(self.meta_optimizer, exp_schedule)
+                if hyperparameters['decay_lr']:
+                    hyperparameters['learning_rate'] = hyperparameters['learning_rate'] * (
+                                1 - meta_step / num_meta_updates)
 
                 for parameter_group in self.meta_optimizer.param_groups:
                     parameter_group['lr'] = hyperparameters['learning_rate']
 
-                networks_before = deepcopy(self.learner.get_networks_and_parameters()['networks'])
-                theta_before_state_dicts = [network.state_dict() for network in networks_before]
+                # print("Before")
+                # print(self.train_networks[0].state_dict()['feature_layer.0.0.weight'])
+
+                networks_before = deepcopy(self.train_networks)
 
                 self.learner.train(run_id, hyperparameters)
 
-                print("Before Meta step network weights:")
-                for key in theta_before_state_dicts[0]:
-                    print(theta_before_state_dicts[0][key])
-                    break
-
-                networks_after = deepcopy(self.learner.get_networks_and_parameters()['networks'])
-                theta_after_state_dicts = [network.state_dict() for network in networks_after]
-
-                print("After Training network weights")
-                for key in theta_after_state_dicts[0]:
-                    print(theta_after_state_dicts[0][key])
-                    break
+                # print(self.learner.get_networks_and_parameters()['networks'][0].state_dict()['feature_layer.0.0.weight'])
 
                 self.meta_optimizer.zero_grad()
                 if meta_algorithm == 'reptile':
                     print("Performing reptile meta update!")
                     # Set Theta - W as gradient to step with ADAM
-                    for network_before, network_after in zip(networks_before,
-                                                             self.learner.get_networks_and_parameters()['networks']):
-                        for parameter_before, parameter_after in zip(network_before.parameters(),
-                                                                     network_after.parameters()):
-                            parameter_after.grad = parameter_before.data - parameter_after.data
-
+                    for network_before, network_after in zip(networks_before, self.learner.get_networks_and_parameters()['networks']):
+                        for parameter_init, parameter_after in zip(network_before.parameters(),
+                                                                   network_after.parameters()):
+                            parameter_after.grad = parameter_init.data - parameter_after.data
+                            parameter_after.data = parameter_init.data
                 elif meta_algorithm == 'fomaml':
                     print("Performing First-Order MAML meta update!")
-                    for networks_after, network_before in zip(self.learner.get_networks_and_parameters()['networks'],
-                                                              networks_before):
-                        network_before.load_state_dict(networks_after.state_dict())
+                    for network_before, network_after in zip(networks_before, self.learner.get_networks_and_parameters()['networks']):
+                        for parameter_init, parameter_after in zip(network_before.parameters(),
+                                                                   network_after.parameters()):
+                            parameter_after.data = parameter_init.data
 
                 elif meta_algorithm == 'somaml':
                     print("Performing Second-Order MAML meta update!")
-                    for networks_after, network_before in zip(self.learner.get_networks_and_parameters()['networks'],
-                                                              networks_before):
-                        network_before.load_state_dict(networks_after.state_dict())
+                    for network_before, network_after in zip(networks_before,
+                                                             self.learner.get_networks_and_parameters()['networks']):
+                        for parameter_init, parameter_after in zip(network_before.parameters(),
+                                                                   network_after.parameters()):
+                            parameter_after.data = parameter_init.data
                 else:
                     print("Please enter a valid meta_algorithm: reptile, fomaml or somaml!")
                     exit(-1)
 
                 self.meta_optimizer.step()
                 print("After Meta step network weights")
-                for key in self.learner.get_networks_and_parameters()['networks'][0].state_dict():
-                    print(self.learner.get_networks_and_parameters()['networks'][0].state_dict()[key])
+                for key in self.train_networks[0].state_dict():
+                    print(self.train_networks[0].state_dict()[key])
                     break
 
-                updated_parameters = theta_after_state_dicts
                 self.learner.meta_step += 1
                 self.learner.close_env()
-
-                # self.meta_scheduler.step()
 
                 print("Meta update took {:.3f}s".format(time.time() - meta_start))
 
         elif learner_algorithm == 'ppo' or learner_algorithm == 'sac':
 
             if learner_algorithm == 'ppo':
-                hyperparameters = {'buffer_size': 50000, 'max_steps': 1000000, 'time_horizon': 512, 'decay_lr': True,
-                                   'learning_rate': 0.0003, 'batch_size': 2048, 'hidden_layers': 2, 'layer_size': 256,
+                hyperparameters = {'buffer_size': 5000, 'max_steps': 30000, 'time_horizon': 128, 'decay_lr': True,
+                                   'learning_rate': 0.0003, 'batch_size': 4096, 'hidden_layers': 2, 'layer_size': 512,
                                    'task_distribution': [0.7, 0.2, 0.1], 'num_meta_updates': num_meta_updates,
                                    'Meta Learning Rate': meta_lr, 'Meta Algorithm': meta_algorithm,
                                    'Meta Optimizer': meta_optimizer}
                 self.learner.set_hyperparameters(hyperparameters)
-                self.learner.set_env_parameters(maze_rows=3, maze_cols=3, agent_x=0, agent_z=0, target_x=0,
-                                                target_z=1, random_agent=0, random_target=0, maze_seed=0,
-                                                enable_heatmap=True, enable_sight_cone=True)
+                self.learner.set_env_parameters(maze_rows=3, maze_cols=3, agent_x=0, agent_z=0, target_x=2,
+                                                target_z=2, random_agent=0, random_target=0, maze_seed=0,
+                                                agent_rot=0, enable_heatmap=True, enable_sight_cone=True)
             elif learner_algorithm == 'sac':
-                hyperparameters = {'buffer_size': 500000, 'max_steps': 500000, 'time_horizon': 512,
-                                       'decay_lr': False, 'learning_rate': 0.0003, 'batch_size': 2048, 'hidden_layers': 2,
-                                       'layer_size': 256, 'task_distribution': [0.7, 0.2, 0.1], 'num_meta_updates': num_meta_updates,
-                                       'Meta Learning Rate': meta_lr, 'Meta Algorithm': meta_algorithm,
-                                       'Meta Optimizer': meta_optimizer}
+                hyperparameters = {'buffer_size': 2000000, 'max_steps': 3000000, 'time_horizon': 128,
+                                   'decay_lr': False, 'learning_rate': 0.0003, 'batch_size': 256, 'hidden_layers': 2,
+                                   'layer_size': 512, 'task_distribution': [0.7, 0.2, 0.1],
+                                   'num_meta_updates': num_meta_updates,
+                                   'Meta Learning Rate': meta_lr, 'Meta Algorithm': meta_algorithm,
+                                   'Meta Optimizer': meta_optimizer}
                 self.learner.set_hyperparameters(hyperparameters)
                 self.learner.set_env_parameters(maze_rows=3, maze_cols=3, agent_x=0, agent_z=0, target_x=0,
-                                                target_z=1, random_agent=0, random_target=0, maze_seed=0,
-                                                enable_heatmap=True, enable_sight_cone=True)
+                                                target_z=2, random_agent=0, random_target=0, maze_seed=0,
+                                                enable_heatmap=True, enable_sight_cone=True, agent_rot=0)
             self.learner.init_optimizer()
 
             # Set up the meta optimizer
             optimizer_params = []
-            for network in self.learner.init_networks:
+            for network in self.learner.train_networks:
                 optimizer_params.extend(network.parameters())
             if learner_algorithm == 'sac':
                 optimizer_params.extend(self.learner.init_params[3])
@@ -252,7 +239,7 @@ class MetaLearner:
             elif meta_optimizer == 'sgd':
                 self.meta_optimizer = optim.SGD(chain(optimizer_params), lr=meta_lr)
 
-            hypers_text = [str(key)+": "+str(hyperparameters[key]) for key in hyperparameters]
+            hypers_text = [str(key) + ": " + str(hyperparameters[key]) for key in hyperparameters]
             hypers_text = '  \n'.join(hypers_text)
             self.writer.add_text("Meta-Hyperparameters", hypers_text, 0)
 
@@ -260,29 +247,30 @@ class MetaLearner:
             for key in hyperparameters:
                 print("{:<25s} {:<20s}".format(key, str(hyperparameters[key])))
 
-            networks_trained = self.learner.init_networks
+            networks_trained = self.learner.train_networks
 
             for meta_step in range(num_meta_updates):
                 meta_start = time.time()
                 print("Meta step: {} of {}".format(meta_step, num_meta_updates))
 
                 # task, task_number = self.sample_task_from_distribution(learner_type, hyperparameters['task_distribution'])
-                self.learner.set_env_parameters(maze_rows=2, maze_cols=2, agent_x=0, agent_z=0, target_x=1,
-                                                target_z=0, random_agent=0, random_target=0, maze_seed=0,
-                                                enable_heatmap=True, enable_sight_cone=True)
-                task_number = 21
-                self.writer.add_text("Meta-Tasks", "Meta-Step:"+str(meta_step)+" Task Number"+str(task_number))
+                # self.learner.set_env_parameters(maze_rows=3, maze_cols=3, agent_x=0, agent_z=0, target_x=2,
+                #                                 target_z=2, random_agent=0, random_target=0, maze_seed=0,
+                #                                 enable_heatmap=True, enable_sight_cone=True)
+                task_number = 200
+                self.writer.add_text("Meta-Tasks", "Meta-Step:" + str(meta_step) + " Task Number" + str(task_number))
                 # Decay The overall learning Rate
                 self.learner.options.behaviors["Brain"].hyperparameters.learning_rate = (1 - meta_step / num_meta_updates) * self.learner.init_lr
                 networks_before = deepcopy(networks_trained)
                 # Train Phase
-                networks_trained, parameters_trained, losses_grads = self.learner.train(task_number=task_number, run_id=self.run_id, init_networks=networks_before)
+                networks_trained, parameters_trained, _ = self.learner.train(task_number=task_number,
+                                                                                        run_id=self.run_id,
+                                                                                        init_networks=networks_before)
 
                 print("Weights before Training: ")
                 self.print_weights(networks_before[0].state_dict())
                 print("Weights after Training: ")
                 self.print_weights(networks_trained[0].state_dict())
-
                 # print("Curiosity before Training:")
                 # print(networks_before[3].state_dict()['_state_encoder.linear_encoder.seq_layers.0.weight'])
                 # print("Curiosity after Training:")
@@ -294,7 +282,7 @@ class MetaLearner:
                     # Calculate Gradient for Reptile update
                     # grad = theta_1 - theta_0
                     # Set the gradient of init_network to perform Meta-update
-                    for network_trained, init_network in zip(networks_trained, self.learner.init_networks):
+                    for network_trained, init_network in zip(networks_trained, self.learner.train_networks):
                         for param_t, param_init in zip(network_trained.parameters(), init_network.parameters()):
                             param_init.grad = param_init.data - param_t.data
                     for param_t, param_init in zip(parameters_trained[-1], self.learner.init_params[-1]):
@@ -303,29 +291,39 @@ class MetaLearner:
                     # Get Gradient for First-Order MAML update
                     # grad = grad(Last_update)
                     # Set the gradient of init_network to perform Meta-update
-                    for network_parameters, init_network in zip(parameters_trained, self.learner.init_networks):
+                    for network_parameters, init_network in zip(parameters_trained, self.learner.train_networks):
                         for param_t, param_init in zip(network_parameters, init_network.parameters()):
                             # Set gradients to last gradients of Training
                             param_init.grad = param_t.grad
                     for param_t, param_init in zip(parameters_trained[-1], self.learner.init_params[-1]):
                         param_init.grad = param_t.grad
                 if meta_algorithm == 'somaml':
-                    policy_grads = losses_grads['policy_losses']
-                    print(policy_grads)
-                    # total_loss.backward()
-                    # for network_parameters, init_network in zip(parameters_trained, self.learner.init_networks):
-                    #     for param_t, param_init in zip(network_parameters, init_network.parameters()):
-                    #         # Set gradients to last gradients of Training
-                    #         param_init.grad = param_t.grad
-                    #
-                    # for param_t, param_init in zip(parameters_trained[-1], self.learner.init_params[-1]):
-                    #     param_init.grad = param_t.grad
+                    hyperparameters = {'buffer_size': 5000, 'max_steps': 15000, 'time_horizon': 128, 'decay_lr': True,
+                                       'learning_rate': 0.0003, 'batch_size': 1024, 'hidden_layers': 2,
+                                       'layer_size': 512,
+                                       'task_distribution': [0.7, 0.2, 0.1], 'num_meta_updates': num_meta_updates,
+                                       'Meta Learning Rate': meta_lr, 'Meta Algorithm': meta_algorithm,
+                                       'Meta Optimizer': meta_optimizer}
+                    self.learner.set_hyperparameters(hyperparameters)
+
+                    for network_t, network_init in zip(networks_trained, self.learner.train_networks):
+                        network_init.load_state_dict(network_t.state_dict())
+
+                    init_networks = deepcopy(self.learner.train_networks)
+                    networks_trained, parameters_trained, meta_loss = self.learner.train(task_number=task_number,
+                                                                                         run_id="test_maml_1",
+                                                                                         init_networks=self.learner.train_networks,
+                                                                                         meta_eval=True)
+                    meta_loss.backward()
+                    for i_network, t_network in zip(init_networks, self.learner.train_networks):
+                        t_network.load_state_dict(i_network.state_dict())
+                    print("Succesful MAML Update!")
 
                 # Step the Meta optimizer
                 self.meta_optimizer.step()
 
                 # Load the optimized Network into the next inital network
-                for network_t, network_init in zip(networks_trained, self.learner.init_networks):
+                for network_t, network_init in zip(networks_trained, self.learner.train_networks):
                     network_t.load_state_dict(network_init.state_dict())
 
                 print("Weights after Meta update: ")
@@ -334,13 +332,12 @@ class MetaLearner:
                 self.learner.meta_step += 1
                 print("Meta update took {:.3f}s".format(time.time() - meta_start))
 
+
 if __name__ == '__main__':
-
-
 
     run_id = "Meta_Run_2"
     run_id = sys.argv[1]
-    learner_type = 'ppo'
+    learner_type = 'rainbow'
     learner_type = sys.argv[2]
     meta_learn_algorithm = 'reptile'
     meta_learn_algorithm = sys.argv[3]
@@ -363,16 +360,17 @@ if __name__ == '__main__':
 
     learner = None
     if learner_type == 'ppo':
-        meta_writer = SummaryWriter("results/"+run_id+"_PPO_INFO")
+        meta_writer = SummaryWriter("results/" + run_id + "_PPO_INFO")
         learner = MLAgentsTrainer(run_id=run_id, rl_algorithm='ppo')
     elif learner_type == 'sac':
-        meta_writer = SummaryWriter("results/"+run_id+"_SAC_INFO")
+        meta_writer = SummaryWriter("results/" + run_id + "_SAC_INFO")
         learner = MLAgentsTrainer(run_id=run_id, rl_algorithm='sac')
     elif learner_type == 'rainbow':
-        meta_writer = SummaryWriter("results/"+run_id+"_RBOW_INFO")
+        meta_writer = SummaryWriter("results/" + run_id + "_RBOW_INFO")
         learner = Rainbow_Meta_Learner(device=device, is_meta_learning=True)
     else:
         exit(-1)
 
     meta_learner = MetaLearner(learner, meta_writer, run_id, device)
-    meta_learner.meta_learn(learner_type, meta_learn_algorithm, meta_optimizer, num_meta_updates=num_meta_updates, meta_lr=meta_lr)
+    meta_learner.meta_learn(learner_type, meta_learn_algorithm, meta_optimizer, num_meta_updates=num_meta_updates,
+                            meta_lr=meta_lr)
