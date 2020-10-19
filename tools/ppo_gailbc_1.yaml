@@ -20,11 +20,20 @@ behaviors:
       extrinsic:
         gamma: 0.99
         strength: 1.0
+      gail:
+        strength: 0.01
+        gamma: 0.99
+        encoding_size: 128
+        demo_path: C:/Users/Sebastian/Desktop/RLUnity/RLThesis/Assets/task1.demo
     keep_checkpoints: 1
     max_steps: 1000000
     time_horizon: 128
     summary_freq: 20000
     threaded: true
+    behavioral_cloning:
+      demo_path: C:/Users/Sebastian/Desktop/RLUnity/RLThesis/Assets/task1.demo
+      strength: 0.5
+      steps: 10000
 environment_parameters:
   maze_rows: 3.0
   maze_cols: 3.0
@@ -34,8 +43,8 @@ environment_parameters:
   target_z: 2.0
   random_agent: 0.0
   random_target: 0.0
-  maze_seed: 0
+  maze_seed: -1.0
   agent_rot: 0.0
   enable_sight_cone: 1.0
   enable_heatmap: 1.0
-  difficulty: 0.0
+  difficulty: 1.0

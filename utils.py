@@ -150,8 +150,8 @@ class ActionFlattener:
         return self.action_lookup[action]
 
 
-def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int, random_agent: int, random_target: int,
-                   agent_x: int = 0, agent_z: int = 0, target_x: int = 1, target_z: int = 1, enable_heatmap: bool = True, enable_sight_cone: bool = True, base_port: int = 5000) -> UnityEnvironment:
+def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int, random_agent: int, random_target: int, difficulty: int, agent_rot: int,
+                   agent_x: int, agent_z: int, target_x: int, target_z: int, enable_heatmap: bool, enable_sight_cone: bool, base_port: int) -> UnityEnvironment:
 
     engine_configuration_channel = EngineConfigurationChannel()
     engine_configuration_channel.set_configuration_parameters(time_scale=10.0)
@@ -167,6 +167,8 @@ def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int
     env_parameters_channel.set_float_parameter("random_target", float(random_target))
     env_parameters_channel.set_float_parameter("enable_heatmap", float(enable_heatmap))
     env_parameters_channel.set_float_parameter("enable_sight_cone", float(enable_sight_cone))
+    env_parameters_channel.set_float_parameter("agent_rot", float(agent_rot))
+    env_parameters_channel.set_float_parameter("difficulty", float(difficulty))
 
     env = UnityEnvironment(file_name=env_path,
                            base_port=base_port, timeout_wait=120,

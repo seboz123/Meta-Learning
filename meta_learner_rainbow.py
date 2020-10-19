@@ -20,7 +20,7 @@ def flatten(input):
     return [item for sublist in input for item in sublist]
 
 
-class Rainbow_Meta_Learner:
+class RainbowMetaLearner:
     """DQN Agent interacting with environment.
     """
 
@@ -445,7 +445,7 @@ class Rainbow_Meta_Learner:
             update_steps = 0
 
             while update_steps * steps_per_update < steps_taken:
-                print("Current update step: {} of {} steps".format(update_steps * steps_per_update, steps_taken))
+                # print("Current update step: {} of {} steps".format(update_steps * steps_per_update, steps_taken))
                 loss, elementwise_loss, indices, f_loss, i_loss = self.calc_loss(buffer, buffer_n,
                                                                                  batch_size=batch_size,
                                                                                  n_step=time_horizon)
@@ -502,6 +502,9 @@ class Rainbow_Meta_Learner:
                                            np.mean(losses), self.step)
                 losses.clear()
                 logging_steps += 1
+
+        print("Finished Training")
+        del self.writer
 
 
 if __name__ == '__main__':

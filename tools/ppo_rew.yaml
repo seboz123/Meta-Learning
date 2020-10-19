@@ -37,5 +37,5 @@ environment_parameters:
   maze_seed: 0
   agent_rot: 0.0
   enable_sight_cone: 1.0
-  enable_heatmap: 1.0
+  enable_heatmap: 0.0
   difficulty: 0.0

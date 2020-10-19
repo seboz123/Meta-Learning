@@ -21,7 +21,7 @@ behaviors:
         gamma: 0.99
         strength: 1.0
     keep_checkpoints: 1
-    max_steps: 1000000
+    max_steps: 1500000
     time_horizon: 128
     summary_freq: 20000
     threaded: true
@@ -38,4 +38,3 @@ environment_parameters:
   agent_rot: 0.0
   enable_sight_cone: 1.0
   enable_heatmap: 1.0
-  difficulty: 0.0

@@ -14,12 +14,8 @@
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/MetaLearner.py" beforeDir="false" afterPath="$PROJECT_DIR$/MetaLearner.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/meta_learner_rainbow.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_rainbow.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mlagents-learner.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/mlagents_meta_learner.py" beforeDir="false" afterPath="$PROJECT_DIR$/mlagents_meta_learner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tools/ppo.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/tools/ppo.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/sac.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/tools/sac.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/tensorboard_start.bat" beforeDir="false" afterPath="$PROJECT_DIR$/tools/tensorboard_start.bat" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -49,7 +45,7 @@
     <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
     <property name="TERMINAL_CUSTOM_COMMANDS_GOT_IT" value="true" />
     <property name="com.intellij.ide.scratch.LRUPopupBuilder$1/New Scratch File" value="Python" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/meta_learner_rainbow.py" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/../ml-agents-release-7/ml-agents/ml-agents/mlagents/trainers/trainer/rl_trainer.py" />
     <property name="settings.editor.selected.configurable" value="com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable" />
   </component>
   <component name="RecentsManager">
@@ -65,7 +61,7 @@
       <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results\meta_ppo_run" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.Rainbow">
+  <component name="RunManager" selected="Python.MetaLearner-PPO">
     <configuration name="MLAGENTS-learner1" type="PythonConfigurationType" factoryName="Python" singleton="false">
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -121,7 +117,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
-      <option name="PARAMETERS" value="test_maml ppo reptile sgd 1 0.5" />
+      <option name="PARAMETERS" value="TEST ppo fomaml sgd 10 0.1 1" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -142,7 +138,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
-      <option name="PARAMETERS" value="PPO_cont6_s7 ppo reptile sgd 1 0.5" />
+      <option name="PARAMETERS" value="PPO_meta_1 ppo reptile sgd 50 0.00001" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -163,7 +159,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
-      <option name="PARAMETERS" value="PPO_cont6_s10 ppo reptile sgd 1 0.5" />
+      <option name="PARAMETERS" value="PPO_meta_2 ppo fomaml sgd 30 0.00002" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -184,7 +180,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
-      <option name="PARAMETERS" value="rbw_1 rainbow reptile sgd 20 0.6" />
+      <option name="PARAMETERS" value="Meta_RBW rainbow fomaml sgd 1000 0.0001" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -238,13 +234,16 @@
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
       <option name="SDK_HOME" value="C:\Users\Sebastian\anaconda3\envs\mlagents-release-7\python.exe" />
       <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
       <option name="IS_MODULE_SDK" value="false" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
-      <option name="PARAMETERS" value="SAC_test sac reptile sgd 1 0.5" />
+      <option name="PARAMETERS" value="SAC_RUN_BATCHED sac reptile sgd 50 0.0001" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -563,7 +562,14 @@
       <option name="project" value="LOCAL" />
       <updated>1601416793536</updated>
     </task>
-    <option name="localTasksCounter" value="20" />
+    <task id="LOCAL-00020" summary="Working">
+      <created>1602247090157</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1602247090157</updated>
+    </task>
+    <option name="localTasksCounter" value="21" />
     <servers />
   </component>
   <component name="TodoView">
@@ -620,37 +626,38 @@
     <MESSAGE value="Working Algortihms" />
     <MESSAGE value="Added suppport for ml-agents package" />
     <MESSAGE value="Working Algos" />
-    <option name="LAST_COMMIT_MESSAGE" value="Working Algos" />
+    <MESSAGE value="Working" />
+    <option name="LAST_COMMIT_MESSAGE" value="Working" />
   </component>
   <component name="WindowStateProjectService">
-    <state x="559" y="213" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1602189923063">
+    <state x="176" y="350" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1603111563163">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="559" y="213" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1602189923063" />
+    <state x="176" y="350" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1603111563163" />
     <state x="796" y="102" key="#com.intellij.ide.macro.MacrosDialog" timestamp="1601331210065">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="796" y="102" key="#com.intellij.ide.macro.MacrosDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1601331210065" />
-    <state x="740" y="275" key="FileChooserDialogImpl" timestamp="1602167668954">
+    <state x="740" y="275" key="FileChooserDialogImpl" timestamp="1602248496735">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="740" y="275" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1602167668954" />
-    <state width="1899" height="337" key="GridCell.Tab.0.bottom" timestamp="1602168768704">
+    <state x="740" y="275" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1602248496735" />
+    <state width="1899" height="248" key="GridCell.Tab.0.bottom" timestamp="1603111771908">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="337" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1602168768704" />
-    <state width="1899" height="337" key="GridCell.Tab.0.center" timestamp="1602168768704">
+    <state width="1899" height="248" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1603111771908" />
+    <state width="1899" height="248" key="GridCell.Tab.0.center" timestamp="1603111771908">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="337" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1602168768704" />
-    <state width="1899" height="337" key="GridCell.Tab.0.left" timestamp="1602168768704">
+    <state width="1899" height="248" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1603111771908" />
+    <state width="1899" height="248" key="GridCell.Tab.0.left" timestamp="1603111771908">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="337" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1602168768704" />
-    <state width="1899" height="337" key="GridCell.Tab.0.right" timestamp="1602168768704">
+    <state width="1899" height="248" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1603111771908" />
+    <state width="1899" height="248" key="GridCell.Tab.0.right" timestamp="1603111771908">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="337" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1602168768704" />
+    <state width="1899" height="248" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1603111771908" />
     <state width="1899" height="348" key="GridCell.Tab.1.bottom" timestamp="1602167762390">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
@@ -683,10 +690,10 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="776" y="298" key="chooseDestDirectoryDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1601480775112" />
-    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1601916688771">
+    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1603049775277">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1040@0.0.1920.1040" timestamp="1601916688771" />
+    <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1040@0.0.1920.1040" timestamp="1603049775277" />
     <state x="623" y="225" width="672" height="678" key="search.everywhere.popup" timestamp="1601810112793">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
