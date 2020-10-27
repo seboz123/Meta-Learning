@@ -32,6 +32,20 @@ class MLAgentsTrainer:
         self.options = options
         # Get inital Networks and weights to Meta learn #
 
+    def set_num_envs(self, rl_algorithm: str, num_envs: int):
+        base_port = str(np.random.randint(1000, 10000))
+        if rl_algorithm == 'ppo':
+            args = parser.parse_args(["C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\tools\\ppo.yaml",
+                                      "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze_cont_ref\\RLProject.exe",
+                                      "--num-envs="+str(num_envs), "--torch", "--run-id=init", "--base-port="+base_port, "--force",
+                                      "--force"])
+        elif rl_algorithm == 'sac':
+            args = parser.parse_args(["C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\tools\\sac.yaml",
+                                      "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze_cont_ref\\RLProject.exe",
+                                      "--num-envs="+str(num_envs), "--run-id=init", "--base-port="+base_port, "--force", "--torch"])
+        options = RunOptions.from_argparse(args)
+        self.options = options
+
     def init_optimizer(self):
         max_steps = self.options.behaviors['Brain'].max_steps
         time_horizon = self.options.behaviors['Brain'].time_horizon
@@ -55,6 +69,7 @@ class MLAgentsTrainer:
         self.options.behaviors['Brain'].network_settings.hidden_units = hyperparameters['layer_size']
         self.options.behaviors['Brain'].network_settings.num_layers = hyperparameters['hidden_layers']
         self.options.behaviors['Brain'].max_steps = hyperparameters['max_steps']
+        self.options.behaviors['Brain'].summary_freq = hyperparameters['summary_freq']
         if not hyperparameters['decay_lr']:
             self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule = self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule.CONSTANT
         else:

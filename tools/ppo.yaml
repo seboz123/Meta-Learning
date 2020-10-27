@@ -23,7 +23,7 @@ behaviors:
     keep_checkpoints: 1
     max_steps: 1000000
     time_horizon: 128
-    summary_freq: 20000
+    summary_freq: 50000
     threaded: true
 environment_parameters:
   maze_rows: 3.0

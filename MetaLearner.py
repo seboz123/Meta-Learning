@@ -34,10 +34,11 @@ class MetaLearner:
 
     def get_ppo_hyperparameters(self):
         return {'buffer_size': 60000, 'max_steps': 130000, 'time_horizon': 128, 'decay_lr': False, 'num_epochs': 4,
+                'summary_freq': 20000,
                            'learning_rate': 0.0001, 'batch_size': 4096, 'hidden_layers': 2, 'layer_size': 512}
 
     def get_sac_hyperparameters(self):
-        return {'buffer_size': 50000, 'max_steps': 100000, 'time_horizon': 128,
+        return {'buffer_size': 50000, 'max_steps': 100000, 'time_horizon': 128, 'summary_freq': 20000,
                            'decay_lr': False, 'learning_rate': 0.0003, 'batch_size': 2048, 'hidden_layers': 2,
                            'layer_size': 512}
 
@@ -46,6 +47,36 @@ class MetaLearner:
             if i == 5:
                 print(weight[key])
                 break
+
+    def joint_train(self, num_updates, task_dist):
+
+        self.learner.set_env_parameters(difficulty=0, maze_rows=3, maze_cols=3, agent_x=0, agent_z=0, target_x=2,
+                                        target_z=2, random_agent=0, random_target=0, maze_seed=0, joint_training=False,
+                                        agent_rot=0, enable_heatmap=True, enable_sight_cone=True)
+        self.learner.init_optimizer()
+        hyperparameters = self.get_ppo_hyperparameters()
+        # hyperparameters['max_steps'] = 15000000
+        hyperparameters['task_dist'] = task_dist
+        self.learner.set_hyperparameters(hyperparameters)
+        seeds = [i for i in range(num_meta_updates + 20)]
+        networks_trained = self.learner.train_networks
+
+        for step in range(num_updates):
+            difficulty = np.where(np.random.multinomial(1, hyperparameters['task_dist']) == 1)[0][0] + 1
+            seed = seeds[step]
+            task_number = difficulty * 1000 + seed
+            self.learner.set_env_parameters(difficulty=difficulty, maze_rows=3, maze_cols=3, agent_x=0, agent_z=0,
+                                            target_x=2,
+                                            target_z=2, random_agent=0, random_target=0, maze_seed=seed, agent_rot=0,
+                                            joint_training=False,
+                                            enable_heatmap=True, enable_sight_cone=True)
+
+            networks_trained, parameters_trained, _ = self.learner.train(task_number=task_number,
+                                                                         run_id="Joint_RUN_"+str(step),
+                                                                         init_networks=networks_trained)
+
+        self.eval(learner_algorithm='ppo', eval_networks=networks_trained)
+
 
     def meta_learn(self, learner_algorithm: str, meta_algorithm: str, meta_optimizer: str, num_meta_updates: int,
                    meta_lr: float, meta_batch_size: int, task_dist: list):
@@ -142,13 +173,6 @@ class MetaLearner:
                             print("Enter valid Meta optimizer")
                             exit(-1)
 
-                    if hyperparameters['decay_lr']:
-                        hyperparameters['learning_rate'] = hyperparameters['learning_rate'] * (
-                                    1 - meta_step / num_meta_updates)
-
-                    for parameter_group in self.meta_optimizer.param_groups:
-                        parameter_group['lr'] = hyperparameters['learning_rate']
-
                     # print("Before")
                     # print(self.train_networks[0].state_dict()['feature_layer.0.0.weight'])
 
@@ -220,6 +244,8 @@ class MetaLearner:
                                                     target_z=2, random_agent=0, random_target=0, maze_seed=0,joint_training=False,
                                                     agent_rot=0, enable_heatmap=True, enable_sight_cone=True)
                 self.learner.init_optimizer()
+
+
 
                 # Set up the meta optimizer
                 optimizer_params = []
@@ -304,7 +330,7 @@ class MetaLearner:
                     self.meta_optimizer.zero_grad()
                     # Perform Meta-update
                     if meta_algorithm == 'reptile':
-                        self.reptile(parameters_batched, hyperparameters['meta_batch_size'], hyperparameters['learning_rate'], learner_algorithm)
+                        self.reptile(parameters_batched, hyperparameters)
                     if meta_algorithm == 'fomaml':
                         self.fomaml(networks_batched, parameters_batched, hyperparameters)
                     # Step the Meta optimizer
@@ -333,17 +359,17 @@ class MetaLearner:
                 self.eval(eval_networks=networks_trained,learner_algorithm='ppo')
 
 
-    def reptile(self, parameters_batch, meta_batch_size, learning_rate):
+    def reptile(self, parameters_batch, hyperparameters):
         print("Perfoming reptile update!")
         # Calculate Gradient for Reptile update
         # grad = theta_1 - theta_0
         # Set the gradient of init_network to perform Meta-update
-        if meta_batch_size == 1:
+        if hyperparameters['meta_batch_size'] == 1:
             for network_trained, init_network in zip(parameters_batch[0], self.learner.train_networks):
                 for param_t, param_init in zip(network_trained, init_network.parameters()):
                     # Set gradients to last gradients of Training
                     try:
-                        param_init.grad = (param_init.data - param_t.data) / learning_rate
+                        param_init.grad = (param_init.data - param_t.data) / hyperparameters['learning_rate']
                     except TypeError:
                         pass
         else:
@@ -355,7 +381,7 @@ class MetaLearner:
                         for param_t, param_init in zip(network_parameters, init_network.parameters()):
                             # Set gradients to last gradients of Training
                             try:
-                                param_init.grad = (param_init.data - param_t.data) / learning_rate
+                                param_init.grad = (param_init.data - param_t.data) / hyperparameters['learning_rate']
                             except TypeError:
                                 pass
                 else:
@@ -364,7 +390,7 @@ class MetaLearner:
                         for param_t, param_init in zip(network_parameters, init_network.parameters()):
                             # Set gradients to last gradients of Training
                             try:
-                                param_init.grad += (param_init.data - param_t.data) / learning_rate
+                                param_init.grad += (param_init.data - param_t.data) / hyperparameters['learning_rate']
                             except TypeError:
                                 pass
                 counter += 1
@@ -466,12 +492,14 @@ class MetaLearner:
     def eval(self, eval_networks, learner_algorithm):
         # Start Eval
         # Evaluating Meta-Run
+        learner.set_num_envs(learner_algorithm, 1)
 
         if learner_algorithm == 'ppo':
             hyperparameters = self.get_ppo_hyperparameters()
             hyperparameters['max_steps'] = 1000000
             hyperparameters['batch_size'] = 4096
             hyperparameters['buffer_size'] = 60000
+            hyperparameters['summary_freq'] = 50000
             self.learner.set_hyperparameters(hyperparameters)
         elif learner_algorithm == 'sac':
             pass
@@ -546,5 +574,6 @@ if __name__ == '__main__':
         exit(-1)
 
     meta_learner = MetaLearner(learner, meta_writer, run_id, device)
+    # meta_learner.joint_train(30, task_dist=[0.4, 0.3, 0.15, 0.15])
     meta_learner.meta_learn(learner_type, meta_learn_algorithm, meta_optimizer, num_meta_updates=num_meta_updates,
-                            meta_lr=meta_lr, meta_batch_size=meta_batch_size, task_dist=[0.4, 0.3, 0.15, 0.15])
+                             meta_lr=meta_lr, meta_batch_size=meta_batch_size, task_dist=[0.4, 0.3, 0.15, 0.15])

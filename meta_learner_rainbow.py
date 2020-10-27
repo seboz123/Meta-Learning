@@ -55,12 +55,12 @@ class RainbowMetaLearner:
         hyperparameters['batch_size'] = 512  # Typical range: 32-512
         hyperparameters['hidden_layers'] = 1
         hyperparameters['layer_size'] = 256
-        hyperparameters['time_horizon'] = 512
+        hyperparameters['time_horizon'] = 3
         hyperparameters['gamma'] = 0.99
         hyperparameters['decay_lr'] = True
 
         hyperparameters['buffer_size'] = 5000  # Replay buffer size
-        hyperparameters['steps_per_update'] = 12
+        hyperparameters['steps_per_update'] = 24
 
         hyperparameters['epsilon'] = 0.15  # Percentage to explore epsilon = 0 -> Decaying after half training
         hyperparameters['v_max'] = 13  # Maximum Value of Reward
@@ -383,7 +383,8 @@ class RainbowMetaLearner:
 
     def train(self, run_id: str, hyperparameters: dict):
         self.step = 0
-        self.writer = SummaryWriter("results/" + run_id + "_step_" + str(self.meta_step))
+        if self.is_meta_learning:
+            self.writer = SummaryWriter("results/" + run_id + "_step_" + str(self.meta_step))
 
         hypers_text = [str(key) + ": " + str(hyperparameters[key]) for key in hyperparameters]
         hypers_text = '  \n'.join(hypers_text)
@@ -511,11 +512,14 @@ if __name__ == '__main__':
 
     run_id = sys.argv[1]
     buffer_size = int(sys.argv[2])
-    epsilon = float(sys.argv[3])
-    time_horizon = int(sys.argv[4])
-    alpha = float(sys.argv[5])
+    batch_size = int(sys.argv[3])
+    epsilon = float(sys.argv[4])
+    time_horizon = int(sys.argv[5])
+    alpha = float(sys.argv[6])
+    beta = float(sys.argv[7])
 
-    writer = SummaryWriter(run_id)
+
+    writer = SummaryWriter("results/"+run_id)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if device == 'cuda':
@@ -524,13 +528,10 @@ if __name__ == '__main__':
         print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
         print('Cached:   ', round(torch.cuda.memory_cached(0) / 1024 ** 3, 1), 'GB')
 
-    dqn_module = Rainbow_Meta_Learner(device=device, is_meta_learning=False)
-
-
-
-
+    dqn_module = RainbowMetaLearner(device=device, is_meta_learning=False)
+    dqn_module.writer = writer
     env = init_unity_env("mMaze_dis_ref/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
-                         agent_x=0, agent_z=0, target_x=2, target_z=2, enable_sight_cone=True)
+                         agent_x=0, agent_z=0, target_x=2, target_z=2, enable_sight_cone=True, difficulty=0, agent_rot=0, enable_heatmap=1, base_port=np.random.randint(10, 9900))
 
     ############ Hyperparameters DQN ##############
     hyperparameters = dqn_module.get_default_hyperparameters()
@@ -548,8 +549,8 @@ if __name__ == '__main__':
     hyperparameters['v_max'] = 15  # Maximum Value of Reward
     hyperparameters['v_min'] = -15  # Minimum Value of Reward
     hyperparameters['atom_size'] = 51  # Atom Size for categorical DQN
-    hyperparameters['update_period'] = 80  # Period after which Target Network gets updated
-    hyperparameters['beta'] = 0.4  # How much to use importance sampling
+    hyperparameters['update_period'] = 30  # Period after which Target Network gets updated
+    hyperparameters['beta'] = beta  # How much to use importance sampling
     hyperparameters['alpha'] = alpha  # How much to use prioritization
     hyperparameters['prior_eps'] = 1e-6  # Guarantee to use all experiences
 
