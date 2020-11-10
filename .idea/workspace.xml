@@ -14,14 +14,10 @@
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/MetaLearner.py" beforeDir="false" afterPath="$PROJECT_DIR$/MetaLearner.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/meta_learner_rainbow.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_rainbow.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mlagents_meta_learner.py" beforeDir="false" afterPath="$PROJECT_DIR$/mlagents_meta_learner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tools/Meta_train - Kopie.bat" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/tools/Meta_train.bat" beforeDir="false" afterPath="$PROJECT_DIR$/tools/Meta_train.bat" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/ppo.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/tools/ppo.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/ppo_train - Kopie.bat" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tools/ppo_train_2.bat" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/tools/rbw_train.bat" beforeDir="false" afterPath="$PROJECT_DIR$/tools/rbw_train.bat" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/sac.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/tools/sac.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/sac_train.bat" beforeDir="false" afterPath="$PROJECT_DIR$/tools/sac_train.bat" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/tensorboard_start_sac.bat" beforeDir="false" afterPath="$PROJECT_DIR$/tools/tensorboard_start_sac.bat" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -54,19 +50,19 @@
     <property name="settings.editor.selected.configurable" value="com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable" />
   </component>
   <component name="RecentsManager">
-    <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results_rainbow" />
-      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results_etc" />
-      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results_sac" />
-      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results" />
-      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results\Meta" />
-    </key>
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\tools" />
       <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner" />
     </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results_sac" />
+      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results_rainbow" />
+      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results_etc" />
+      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results" />
+      <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results\Meta" />
+    </key>
   </component>
-  <component name="RunManager" selected="Python.MetaLearner-PPO">
+  <component name="RunManager" selected="Python.mail">
     <configuration name="MLAGENTS-learner1" type="PythonConfigurationType" factoryName="Python" singleton="false">
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -298,6 +294,27 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="mail" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="Meta-Learner" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$APPLICATION_CONFIG_DIR$/scratches" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$APPLICATION_CONFIG_DIR$/scratches/mail.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="maml_test" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -400,25 +417,27 @@
       <method v="2" />
     </configuration>
     <list>
-      <item itemvalue="Python.MLAGENTS-learner1" />
-      <item itemvalue="Python.MLAGENTS-learner2" />
+      <item itemvalue="Python.MetaLearner-RBW" />
+      <item itemvalue="Python.Rainbow" />
       <item itemvalue="Python.MetaLearner-PPO" />
       <item itemvalue="Python.MetaLearner-PPO_2" />
       <item itemvalue="Python.MetaLearner-PPO_3" />
-      <item itemvalue="Python.MetaLearner-RBW" />
+      <item itemvalue="Python.MetaLearner-SAC" />
       <item itemvalue="Python.MetaLearner-SAC (1)" />
       <item itemvalue="Python.MetaLearner-SAC (2)" />
-      <item itemvalue="Python.MetaLearner-SAC" />
-      <item itemvalue="Python.Rainbow" />
-      <item itemvalue="Python.Rainbow_Learner" />
-      <item itemvalue="Python.maml_test" />
+      <item itemvalue="Python.MLAGENTS-learner1" />
+      <item itemvalue="Python.MLAGENTS-learner2" />
       <item itemvalue="Python.meta_learner_ppo" />
       <item itemvalue="Python.meta_learner_sac" />
+      <item itemvalue="Python.Rainbow_Learner" />
+      <item itemvalue="Python.maml_test" />
       <item itemvalue="Python.scratch_2" />
       <item itemvalue="tox.Unnamed" />
+      <item itemvalue="Python.mail" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.mail" />
         <item itemvalue="Python.scratch_2" />
       </list>
     </recent_temporary>
@@ -581,7 +600,14 @@
       <option name="project" value="LOCAL" />
       <updated>1603113416046</updated>
     </task>
-    <option name="localTasksCounter" value="22" />
+    <task id="LOCAL-00022" summary="Update for sync with git">
+      <created>1603801536559</created>
+      <option name="number" value="00022" />
+      <option name="presentableId" value="LOCAL-00022" />
+      <option name="project" value="LOCAL" />
+      <updated>1603801536560</updated>
+    </task>
+    <option name="localTasksCounter" value="23" />
     <servers />
   </component>
   <component name="TodoView">
@@ -640,7 +666,8 @@
     <MESSAGE value="Working Algos" />
     <MESSAGE value="Working" />
     <MESSAGE value="Update reptile, fomaml and Framework" />
-    <option name="LAST_COMMIT_MESSAGE" value="Update reptile, fomaml and Framework" />
+    <MESSAGE value="Update for sync with git" />
+    <option name="LAST_COMMIT_MESSAGE" value="Update for sync with git" />
   </component>
   <component name="WindowStateProjectService">
     <state x="374" y="192" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1603322617531">
@@ -655,22 +682,22 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="740" y="275" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1603122914215" />
-    <state width="1899" height="248" key="GridCell.Tab.0.bottom" timestamp="1603732674986">
+    <state width="1899" height="248" key="GridCell.Tab.0.bottom" timestamp="1605007809178">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="248" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1603732674986" />
-    <state width="1899" height="248" key="GridCell.Tab.0.center" timestamp="1603732674986">
+    <state width="1899" height="248" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1605007809178" />
+    <state width="1899" height="248" key="GridCell.Tab.0.center" timestamp="1605007809178">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="248" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1603732674986" />
-    <state width="1899" height="248" key="GridCell.Tab.0.left" timestamp="1603732674986">
+    <state width="1899" height="248" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1605007809178" />
+    <state width="1899" height="248" key="GridCell.Tab.0.left" timestamp="1605007809177">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="248" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1603732674986" />
-    <state width="1899" height="248" key="GridCell.Tab.0.right" timestamp="1603732674986">
+    <state width="1899" height="248" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1605007809177" />
+    <state width="1899" height="248" key="GridCell.Tab.0.right" timestamp="1605007809178">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state width="1899" height="248" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1603732674986" />
+    <state width="1899" height="248" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1605007809178" />
     <state width="1899" height="348" key="GridCell.Tab.1.bottom" timestamp="1602167762390">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>

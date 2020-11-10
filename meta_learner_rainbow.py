@@ -511,12 +511,13 @@ class RainbowMetaLearner:
 if __name__ == '__main__':
 
     run_id = sys.argv[1]
-    buffer_size = int(sys.argv[2])
-    batch_size = int(sys.argv[3])
-    epsilon = float(sys.argv[4])
-    time_horizon = int(sys.argv[5])
-    alpha = float(sys.argv[6])
-    beta = float(sys.argv[7])
+    steps = int(sys.argv[2])
+    buffer_size = int(sys.argv[3])
+    batch_size = int(sys.argv[4])
+    epsilon = float(sys.argv[5])
+    time_horizon = int(sys.argv[6])
+    alpha = float(sys.argv[7])
+    beta = float(sys.argv[8])
 
 
     writer = SummaryWriter("results/"+run_id)
@@ -539,7 +540,7 @@ if __name__ == '__main__':
     hyperparameters['buffer_size'] = buffer_size
     hyperparameters['batch_size'] = 1024
 
-    hyperparameters['max_steps'] = 500000
+    hyperparameters['max_steps'] = steps
     hyperparameters['time_horizon'] = time_horizon
     hyperparameters['decay_lr'] = True
     hyperparameters['learning_rate'] = 0.0003
@@ -550,8 +551,8 @@ if __name__ == '__main__':
     hyperparameters['v_min'] = -15  # Minimum Value of Reward
     hyperparameters['atom_size'] = 51  # Atom Size for categorical DQN
     hyperparameters['update_period'] = 30  # Period after which Target Network gets updated
-    hyperparameters['beta'] = beta  # How much to use importance sampling
-    hyperparameters['alpha'] = alpha  # How much to use prioritization
+    hyperparameters['beta'] = beta  # How much to use importance sampling, 0.4 default
+    hyperparameters['alpha'] = alpha  # How much to use prioritization, 0.5 default
     hyperparameters['prior_eps'] = 1e-6  # Guarantee to use all experiences
 
     hyperparameters['enable_curiosity'] = False
