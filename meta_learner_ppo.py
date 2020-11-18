@@ -15,6 +15,8 @@ from env_utils import step_env
 
 flatten = lambda l: [item for sublist in l for item in sublist]
 
+# Obsolte Version of own PPO Implementation
+# Not used anymore in this Project
 
 class PPO_Meta_Learner:
     def __init__(

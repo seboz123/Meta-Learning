@@ -5,6 +5,8 @@ import random
 from typing import Dict, List, Tuple, Deque
 from segment_tree import MinSegmentTree, SumSegmentTree
 
+# Implementation of Buffers
+# SAC and PPO are obsolete and not used in this Project
 
 class SACBuffer:
     def __init__(self, max_buffer_size: int, obs_space: int, action_space: Tuple):

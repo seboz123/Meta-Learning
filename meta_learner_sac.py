@@ -1,10 +1,8 @@
 import numpy as np
 import time
 from typing import Tuple
-from multiprocessing import Pool
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
@@ -16,6 +14,9 @@ from utils import torch_from_np, break_into_branches, condense_q_stream, get_pro
 from env_utils import step_env
 
 flatten = lambda l: [item for sublist in l for item in sublist]
+
+# Obsolete Version own SAC Implementation
+# Not used anymore in this project
 
 class SAC_Meta_Learner:
     def __init__(

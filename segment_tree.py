@@ -78,12 +78,6 @@ class SegmentTree:
 
 
 class SumSegmentTree(SegmentTree):
-    """ Create SumSegmentTree.
-
-    Taken from OpenAI baselines github repository:
-    https://github.com/openai/baselines/blob/master/baselines/common/segment_tree.py
-
-    """
 
     def __init__(self, capacity: int):
         """Initialization.
@@ -102,7 +96,6 @@ class SumSegmentTree(SegmentTree):
 
     def retrieve(self, upperbound: float) -> int:
         """Find the highest index `i` about upper bound in the tree"""
-        # TODO: Check assert case and fix bug
         assert 0 <= upperbound <= self.sum() + 1e-5, "upperbound: {}".format(upperbound)
 
         idx = 1
@@ -119,12 +112,6 @@ class SumSegmentTree(SegmentTree):
 
 
 class MinSegmentTree(SegmentTree):
-    """ Create SegmentTree.
-
-    Taken from OpenAI baselines github repository:
-    https://github.com/openai/baselines/blob/master/baselines/common/segment_tree.py
-
-    """
 
     def __init__(self, capacity: int):
         """Initialization.

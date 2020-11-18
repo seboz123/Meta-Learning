@@ -1,11 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
-from buffers import SACBuffer, PPOBuffer
-import numpy as np
 
 from utils import Swish, torch_from_np, actions_to_onehot
+
+# Implementation of Curiosity Module
 
 class CuriosityModule():
     def __init__(self, obs_size: int, enc_size: int, hidden_layers: int, hidden_size: int,device: torch.device,

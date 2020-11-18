@@ -13,11 +13,17 @@
     <list default="true" id="960b84bd-6af4-4c55-afb2-b6cb4969d05a" name="Default Changelist" comment="Working SAC">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/MetaLearner.py" beforeDir="false" afterPath="$PROJECT_DIR$/MetaLearner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/meta_learner_rainbow.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_rainbow.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/Meta_train - Kopie.bat" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/buffers.py" beforeDir="false" afterPath="$PROJECT_DIR$/buffers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/curiosity_module.py" beforeDir="false" afterPath="$PROJECT_DIR$/curiosity_module.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/env_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/env_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/meta_learner_ppo.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_ppo.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/meta_learner_sac.py" beforeDir="false" afterPath="$PROJECT_DIR$/meta_learner_sac.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mlagents_meta_learner.py" beforeDir="false" afterPath="$PROJECT_DIR$/mlagents_meta_learner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/segment_tree.py" beforeDir="false" afterPath="$PROJECT_DIR$/segment_tree.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tools/Meta_train.bat" beforeDir="false" afterPath="$PROJECT_DIR$/tools/Meta_train.bat" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tools/ppo_train_2.bat" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/tools/rbw_train.bat" beforeDir="false" afterPath="$PROJECT_DIR$/tools/rbw_train.bat" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -62,7 +68,7 @@
       <recent name="C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner\results\Meta" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.mail">
+  <component name="RunManager" selected="Python.MetaLearner-PPO">
     <configuration name="MLAGENTS-learner1" type="PythonConfigurationType" factoryName="Python" singleton="false">
       <module name="Meta-Learner" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -118,7 +124,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/MetaLearner.py" />
-      <option name="PARAMETERS" value="Reptile_30_mlr_00002 ppo reptile sgd 3 0.00002 1" />
+      <option name="PARAMETERS" value="Joint_train_10 ppo joint_train sgd 10 0.01 1 0 0" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
@@ -432,8 +438,8 @@
       <item itemvalue="Python.Rainbow_Learner" />
       <item itemvalue="Python.maml_test" />
       <item itemvalue="Python.scratch_2" />
-      <item itemvalue="tox.Unnamed" />
       <item itemvalue="Python.mail" />
+      <item itemvalue="tox.Unnamed" />
     </list>
     <recent_temporary>
       <list>
@@ -607,7 +613,14 @@
       <option name="project" value="LOCAL" />
       <updated>1603801536560</updated>
     </task>
-    <option name="localTasksCounter" value="23" />
+    <task id="LOCAL-00023" summary="Update of Project">
+      <created>1605013400450</created>
+      <option name="number" value="00023" />
+      <option name="presentableId" value="LOCAL-00023" />
+      <option name="project" value="LOCAL" />
+      <updated>1605013400451</updated>
+    </task>
+    <option name="localTasksCounter" value="24" />
     <servers />
   </component>
   <component name="TodoView">
@@ -667,12 +680,14 @@
     <MESSAGE value="Working" />
     <MESSAGE value="Update reptile, fomaml and Framework" />
     <MESSAGE value="Update for sync with git" />
-    <option name="LAST_COMMIT_MESSAGE" value="Update for sync with git" />
+    <MESSAGE value="Update of Project" />
+    <option name="LAST_COMMIT_MESSAGE" value="Update of Project" />
   </component>
   <component name="WindowStateProjectService">
-    <state x="374" y="192" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1603322617531">
-      <screen x="0" y="0" width="1920" height="1040" />
+    <state x="24" y="129" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1605457219551">
+      <screen x="0" y="0" width="1600" height="860" />
     </state>
+    <state x="24" y="129" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1600.860@0.0.1600.860" timestamp="1605457219551" />
     <state x="374" y="192" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040@0.0.1920.1040" timestamp="1603322617531" />
     <state x="796" y="102" key="#com.intellij.ide.macro.MacrosDialog" timestamp="1601331210065">
       <screen x="0" y="0" width="1920" height="1040" />
@@ -682,22 +697,26 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="740" y="275" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1603122914215" />
-    <state width="1899" height="248" key="GridCell.Tab.0.bottom" timestamp="1605007809178">
-      <screen x="0" y="0" width="1920" height="1040" />
+    <state width="1579" height="195" key="GridCell.Tab.0.bottom" timestamp="1605457222116">
+      <screen x="0" y="0" width="1600" height="860" />
     </state>
-    <state width="1899" height="248" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1605007809178" />
-    <state width="1899" height="248" key="GridCell.Tab.0.center" timestamp="1605007809178">
-      <screen x="0" y="0" width="1920" height="1040" />
+    <state width="1579" height="195" key="GridCell.Tab.0.bottom/0.0.1600.860@0.0.1600.860" timestamp="1605457222116" />
+    <state width="1899" height="248" key="GridCell.Tab.0.bottom/0.0.1920.1040@0.0.1920.1040" timestamp="1605013464094" />
+    <state width="1579" height="195" key="GridCell.Tab.0.center" timestamp="1605457222116">
+      <screen x="0" y="0" width="1600" height="860" />
     </state>
-    <state width="1899" height="248" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1605007809178" />
-    <state width="1899" height="248" key="GridCell.Tab.0.left" timestamp="1605007809177">
-      <screen x="0" y="0" width="1920" height="1040" />
+    <state width="1579" height="195" key="GridCell.Tab.0.center/0.0.1600.860@0.0.1600.860" timestamp="1605457222116" />
+    <state width="1899" height="248" key="GridCell.Tab.0.center/0.0.1920.1040@0.0.1920.1040" timestamp="1605013464094" />
+    <state width="1579" height="195" key="GridCell.Tab.0.left" timestamp="1605457222115">
+      <screen x="0" y="0" width="1600" height="860" />
     </state>
-    <state width="1899" height="248" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1605007809177" />
-    <state width="1899" height="248" key="GridCell.Tab.0.right" timestamp="1605007809178">
-      <screen x="0" y="0" width="1920" height="1040" />
+    <state width="1579" height="195" key="GridCell.Tab.0.left/0.0.1600.860@0.0.1600.860" timestamp="1605457222115" />
+    <state width="1899" height="248" key="GridCell.Tab.0.left/0.0.1920.1040@0.0.1920.1040" timestamp="1605013464094" />
+    <state width="1579" height="195" key="GridCell.Tab.0.right" timestamp="1605457222116">
+      <screen x="0" y="0" width="1600" height="860" />
     </state>
-    <state width="1899" height="248" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1605007809178" />
+    <state width="1579" height="195" key="GridCell.Tab.0.right/0.0.1600.860@0.0.1600.860" timestamp="1605457222116" />
+    <state width="1899" height="248" key="GridCell.Tab.0.right/0.0.1920.1040@0.0.1920.1040" timestamp="1605013464094" />
     <state width="1899" height="348" key="GridCell.Tab.1.bottom" timestamp="1602167762390">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
@@ -738,9 +757,10 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="769" y="434" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1920.1040@0.0.1920.1040" timestamp="1603049775277" />
-    <state x="623" y="225" width="672" height="678" key="search.everywhere.popup" timestamp="1601810112793">
-      <screen x="0" y="0" width="1920" height="1040" />
+    <state x="519" y="186" width="672" height="561" key="search.everywhere.popup" timestamp="1605453863686">
+      <screen x="0" y="0" width="1600" height="860" />
     </state>
+    <state x="519" y="186" width="672" height="561" key="search.everywhere.popup/0.0.1600.860@0.0.1600.860" timestamp="1605453863686" />
     <state x="623" y="225" width="672" height="678" key="search.everywhere.popup/0.0.1920.1040@0.0.1920.1040" timestamp="1601810112793" />
   </component>
   <component name="XDebuggerManager">
@@ -753,7 +773,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/meta_learner_ppo.py</url>
-          <line>222</line>
+          <line>224</line>
           <option name="timeStamp" value="2" />
         </line-breakpoint>
       </breakpoints>

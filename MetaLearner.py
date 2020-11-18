@@ -1,9 +1,7 @@
 from itertools import chain
 from copy import deepcopy
 import sys
-
 import time
-
 import numpy as np
 import torch
 import torch.optim as optim
@@ -11,9 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from meta_learner_rainbow import RainbowMetaLearner
 from mlagents_meta_learner import MLAgentsTrainer
-
 from utils import init_unity_env
-
 
 # Seed Torch Function
 def seed_torch(seed):
@@ -23,7 +19,6 @@ def seed_torch(seed):
         torch.backends.cudnn.deterministic = True
 
 
-# Get inital configs
 class MetaLearner:
     def __init__(self, learner, writer: SummaryWriter, run_id: str, device: str):
         self.writer = writer
@@ -31,7 +26,7 @@ class MetaLearner:
         self.run_id = run_id
         self.learner = learner
         seed_torch(0)
-    # Get Standard Hyperparameters for Runs
+    # Get Standard Hyperparameters for Algorithms
     def get_ppo_hyperparameters(self):
         return {'buffer_size': 60000, 'max_steps': 130000, 'time_horizon': 128, 'decay_lr': False, 'num_epochs': 4,
                 'summary_freq': 20000,
@@ -49,7 +44,7 @@ class MetaLearner:
                                         agent_rot=0, enable_heatmap=True, enable_sight_cone=True)
         self.learner.init_optimizer()
         hyperparameters = self.get_ppo_hyperparameters()
-        hyperparameters['max_steps'] = 15000000
+        hyperparameters['max_steps'] = 130000
         hyperparameters['task_dist'] = task_dist
         self.learner.set_hyperparameters(hyperparameters)
         seeds = [i for i in range(num_meta_updates + 20)]
@@ -71,7 +66,7 @@ class MetaLearner:
 
         self.eval(learner_algorithm='ppo', eval_networks=networks_trained)
 
-
+    # Start Meta-Learning
     def meta_learn(self, learner_algorithm: str, meta_algorithm: str, meta_optimizer: str, num_meta_updates: int,
                    meta_lr: float, meta_batch_size: int, task_dist: list, separate_fomaml: bool):
         assert meta_algorithm == "reptile" or meta_algorithm == 'fomaml' or meta_algorithm == 'joint_training'
@@ -79,14 +74,12 @@ class MetaLearner:
         start_time = time.localtime()
         start_time = time.strftime("%H:%M:%S", start_time)
         print("Meta Learning started at: " + start_time)
-        # torch.autograd.set_detect_anomaly(True)
 
-
+        # Meta-Learning for Rainbow
         if learner_algorithm == 'rainbow':
             hyperparameters = self.learner.get_default_hyperparameters()
             hyperparameters['buffer_size'] = 20000
             hyperparameters['batch_size'] = 1024
-
             hyperparameters['max_steps'] = 100000
             hyperparameters['time_horizon'] = 3
             hyperparameters['decay_lr'] = False
@@ -97,6 +90,7 @@ class MetaLearner:
             hyperparameters['Meta Optimizer'] = meta_optimizer
             hyperparameters['task_dist'] = task_dist
             hyperparameters['meta_batch_size'] = meta_batch_size
+            # Save Hyperparameters for Tensorboard
             hypers_text = [str(key) + ": " + str(hyperparameters[key]) for key in hyperparameters]
             hypers_text = '  \n'.join(hypers_text)
             self.writer.add_text("Meta-Hyperparameters", hypers_text, 0)
@@ -109,16 +103,16 @@ class MetaLearner:
                 meta_start = time.time()
                 print("Meta step: {} of {}".format(meta_step, num_meta_updates))
 
-                # task, task_number = self.sample_task_from_distribution(learner_algorithm, hyperparameters['task_distribution'])
                 difficulty = np.where(np.random.multinomial(1, hyperparameters['task_dist']) == 1)[0][0] + 1
                 seed = np.random.randint(0, 4)
                 task_number = difficulty*1000 + seed
-
+                # Start environment with sampled difficulty
                 task = init_unity_env('mMaze_dis_ref/RLProject.exe', difficulty=difficulty, maze_rows=3, maze_cols=3, agent_x=0, agent_z=0, target_x=2,
                                                 target_z=2, random_agent=0, random_target=0, maze_seed=seed, base_port=np.random.randint(1000, 10000),
                                                 agent_rot=0, enable_heatmap=True, enable_sight_cone=True)
                 self.learner.set_env_and_detect_spaces(task, task_number)
 
+                # Initialize Optimizers
                 if meta_step == 0:
                     self.learner.init_networks_and_optimizers(hyperparameters)
                     self.train_networks = self.learner.get_networks_and_parameters()['networks']
@@ -133,14 +127,8 @@ class MetaLearner:
                         print("Enter valid Meta optimizer")
                         exit(-1)
 
-                # print("Before")
-                # print(self.train_networks[0].state_dict()['feature_layer.0.0.weight'])
-
                 networks_before = deepcopy(self.train_networks)
-
                 self.learner.train(run_id, hyperparameters)
-
-                # print(self.learner.get_networks_and_parameters()['networks'][0].state_dict()['feature_layer.0.0.weight'])
 
                 self.meta_optimizer.zero_grad()
                 if meta_algorithm == 'reptile':
@@ -162,16 +150,12 @@ class MetaLearner:
                     exit(-1)
 
                 self.meta_optimizer.step()
-                print("After Meta step network weights")
-                for key in self.train_networks[0].state_dict():
-                    print(self.train_networks[0].state_dict()[key])
-                    break
-
                 self.learner.meta_step += 1
                 self.learner.close_env()
 
                 print("Meta update took {:.3f}s".format(time.time() - meta_start))
 
+        # Meta Learning of PPO or SAC
         elif learner_algorithm == 'ppo' or learner_algorithm == 'sac':
 
             if learner_algorithm == 'ppo':
@@ -229,10 +213,10 @@ class MetaLearner:
             parameters_trained = self.learner.init_params[-1]
 
             seeds = [i for i in range(num_meta_updates+20)]
-
+            # Outer Loop
             for meta_step in range(num_meta_updates):
                 print("Meta step: {} of {}".format(meta_step, num_meta_updates))
-
+                # Sample task according to distribution
                 difficulty = np.where(np.random.multinomial(1, hyperparameters['task_dist']) == 1)[0][0]+1
                 seed = seeds[meta_step]
                 task_number = difficulty*1000 + seed
@@ -251,13 +235,12 @@ class MetaLearner:
                     if i == 3:
                         print(weight)
                         break
+                # Inner-Loop Update
+                # Detect Batched and Non-Batched Versions of Meta-Learning Algorithm
                 if hyperparameters['meta_batch_size'] > 1:
                     networks_batched = []
                     parameters_batched = []
                     for i in range(hyperparameters['meta_batch_size']):
-                        print("Weights before Training: ")
-                        # for weight in networks_before[-1]:
-                        #     print(weight)
                         difficulty = np.where(np.random.multinomial(1, hyperparameters['task_dist']) == 1)[0][0] + 1
                         seed = seeds[meta_step]+i+num_meta_updates
                         task_number = difficulty * 1000 + seed
@@ -422,7 +405,7 @@ class MetaLearner:
 
     def eval(self, eval_networks, learner_algorithm):
         # Start Evaluation
-        # Evaluating Meta-Run
+        # Evaluating Finished Meta-Run on pre-defined Tasks
         learner.set_num_envs(learner_algorithm, 1)
 
         if learner_algorithm == 'ppo':
@@ -450,7 +433,7 @@ class MetaLearner:
                                             target_x=2, joint_training=False,
                                             target_z=2, random_agent=0, random_target=0, maze_seed=seed, agent_rot=0,
                                             enable_heatmap=True, enable_sight_cone=True)
-
+            # Start 3 Runs because of high Variance
             self.learner.train(task_number=task_number,
                                run_id=self.run_id + "_eval_task_"+str(difficulty)+"_0",
                                init_networks=networks_before)
@@ -466,7 +449,7 @@ class MetaLearner:
 
 if __name__ == '__main__':
 
-    ### Set Parameters per Command-line
+    ### Set Training-Parameters per Command-line
     run_id = "Meta_Run_2"
     run_id = sys.argv[1]
     learner_type = 'rainbow'
@@ -484,11 +467,10 @@ if __name__ == '__main__':
     separate_fomaml = True if tmp_separate_fomaml == 1 else False
     task_dist_number = int(sys.argv[9])
 
-
-    task_dist = [[0.4, 0.3, 0.15, 0.15], [0.8, 0.1, 0.05, 0.05], [0.05, 0.05, 0.2, 0.7],[0.25, 0.25, 0.25, 0.25]]
+    task_dist = [[0.4, 0.3, 0.15, 0.15], [0.8, 0.1, 0.05, 0.05], [0.05, 0.05, 0.1, 0.8],[0.25, 0.25, 0.25, 0.25]]
     print("Current Run ID: " + run_id)
 
-    # Get Cuda Infos
+    # Get Cuda Device for Gpu support
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == 'cuda':
         print(torch.cuda.get_device_name(0))
@@ -496,6 +478,7 @@ if __name__ == '__main__':
         print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
         print('Cached:   ', round(torch.cuda.memory_reserved(0) / 1024 ** 3, 1), 'GB')
 
+    # Initialize new Learner of Type 'ppo', 'sac' or 'rainbow'
     learner = None
     if learner_type == 'ppo':
         meta_writer = SummaryWriter("results/" + run_id + "_INFO_PPO")
@@ -510,5 +493,8 @@ if __name__ == '__main__':
         exit(-1)
 
     meta_learner = MetaLearner(learner, meta_writer, run_id, device)
-    meta_learner.meta_learn(learner_type, meta_learn_algorithm, meta_optimizer, num_meta_updates=num_meta_updates,
+    if meta_learn_algorithm == 'joint_train':
+        meta_learner.joint_train(num_updates=10, task_dist=task_dist[task_dist_number])
+    else:
+        meta_learner.meta_learn(learner_type, meta_learn_algorithm, meta_optimizer, num_meta_updates=num_meta_updates,
                              meta_lr=meta_lr, meta_batch_size=meta_batch_size, task_dist=task_dist[task_dist_number], separate_fomaml=separate_fomaml)

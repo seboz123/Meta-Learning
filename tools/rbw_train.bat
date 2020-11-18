@@ -7,10 +7,13 @@ cd "C:\Users\Sebastian\Desktop\RLUnity\Meta-Learner"
 setlocal EnableDelayedExpansion
 REM Start RBW Runs:
 
-call python meta_learner_rainbow.py rbw_best_0 1500000 10000 2048 0.2 5 0.3 0.6
+call python meta_learner_rainbow.py rbw_batch_512_0 500000 10000 512 0.2 5 0.3 0.6
+call python meta_learner_rainbow.py rbw_batch_512_1 500000 10000 512 0.2 5 0.3 0.6
+call python meta_learner_rainbow.py rbw_batch_512_2 500000 10000 512 0.2 5 0.3 0.6
 
-
-
+call python meta_learner_rainbow.py rbw_batch_1024_0 500000 10000 1024 0.2 5 0.3 0.6
+call python meta_learner_rainbow.py rbw_batch_1024_1 500000 10000 1024 0.2 5 0.3 0.6
+call python meta_learner_rainbow.py rbw_batch_1024_2 500000 10000 1024 0.2 5 0.3 0.6
 
 
 

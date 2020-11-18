@@ -1,6 +1,9 @@
 import numpy as np
 from mlagents_envs.environment import UnityEnvironment
 
+# Function to step the environment
+# Supports Multi-Agent Environements
+
 def step_env(env: UnityEnvironment, actions: np.array):
     agents_transitions = {}
     for brain in env.behavior_specs:

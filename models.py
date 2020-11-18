@@ -6,7 +6,9 @@ from torch.distributions import Categorical
 import torch.nn.functional as F
 import numpy as np
 
+# Contains Implementations of Neural Networks used for PPO/SAC/Rainbow
 
+# Actor-Critic Policy Implementation for PPO/SAC
 class ActorCriticPolicy(nn.Module):
     class SharedActorCritic(nn.Module):
         def __init__(self, state_dim, act_dim, hidden_size, num_hidden_layers, enable_curiosity: bool):
@@ -163,6 +165,7 @@ class PolicyValueNetwork(nn.Module):
         q2_out = self.q2(obs)
         return q1_out, q2_out
 
+# Implementation of Noise-Layers for Rainbow
 
 class NoisyLinear(nn.Module):
     """Noisy linear module for NoisyNet.
@@ -244,6 +247,7 @@ class NoisyLinear(nn.Module):
 
         return x.sign().mul(x.abs().sqrt())
 
+# Implementation of DeepQ Network for Rainbow
 
 class DeepQNetwork(nn.Module):
     def __init__(
@@ -358,8 +362,6 @@ class TorchNetworks:
 
         self.target_entropy = [self.discrete_target_entropy_scale * np.log(i).astype(np.float32) for i in act_dim]
 
-        # self.policy_params = list(self.policy_network.parameters())
-        # self.value_params = list(self.value_network.parameters())
 
     def soft_update(self, source: nn.Module, target: nn.Module, tau: float):
         for source_param, target_param in zip(source.parameters(), target.parameters()):

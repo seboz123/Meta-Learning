@@ -12,7 +12,7 @@ log_level = logging_util.INFO
 tf_utils.set_warnings_enabled(False)
 logging_util.set_log_level(log_level)
 
-
+# Meta-Learner Implementation for ML-Agents Toolkit
 class MLAgentsTrainer:
     def __init__(self, run_id: str, rl_algorithm: str):
         self.meta_step = 0
@@ -47,6 +47,7 @@ class MLAgentsTrainer:
         self.options = options
 
     def init_optimizer(self):
+        # Initialize Optimizers
         max_steps = self.options.behaviors['Brain'].max_steps
         time_horizon = self.options.behaviors['Brain'].time_horizon
         self.init_lr = self.options.behaviors['Brain'].hyperparameters.learning_rate
@@ -59,6 +60,7 @@ class MLAgentsTrainer:
         self.options.checkpoint_settings.force = True
 
     def set_hyperparameters(self, hyperparameters: {}):
+        # Set Hyperprameters
         if self.options.behaviors['Brain'].trainer_type == self.options.behaviors['Brain'].trainer_type.PPO:
             self.options.behaviors['Brain'].hyperparameters.num_epoch = hyperparameters['num_epochs']
 
@@ -74,14 +76,12 @@ class MLAgentsTrainer:
             self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule = self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule.CONSTANT
         else:
             self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule = self.options.behaviors['Brain'].hyperparameters.learning_rate_schedule.LINEAR
-        # if self.rl_algorithm == 'sac':
-        #     self.options.behaviors['Brain'].hyperparameters.buffer_init_steps = 8000
-        #     self.options.behaviors['Brain'].hyperparameters.init_entcoef = 0.3
 
     def set_env_parameters(self, maze_rows: int, maze_cols: int, agent_x: int, agent_z: int, target_x: int,
                            target_z: int, agent_rot: float, difficulty: int,
                            random_agent: int, random_target: int, maze_seed: int, enable_sight_cone: bool,
                            enable_heatmap: bool, joint_training: bool):
+        # Set Env Training Parameters (Maze_size, Position of Agent/Target, etc.)
         self.options.environment_parameters['difficulty'] = EnvironmentParameterSettings(
             [Lesson(ConstantSettings(seed=0, value=float(difficulty)), "difficulty", completion_criteria=None)])
         self.options.environment_parameters['maze_rows'] = EnvironmentParameterSettings(
@@ -126,6 +126,7 @@ class MLAgentsTrainer:
                 [Lesson(ConstantSettings(seed=0, value=0.0), "joint_train", completion_criteria=None)])
 
     def train(self, task_number: int, run_id: str = "ppo_", init_networks=None, meta_eval=False):
+        # Start Inner-Loop Deep RL Training
         self.options.checkpoint_settings.run_id = run_id + "_step_"+str(self.meta_step)
         print(self.options.checkpoint_settings.run_id)
         logger.debug("Configuration for this run:")

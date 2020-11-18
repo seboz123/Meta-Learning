@@ -1,19 +1,21 @@
 import torch
-import torch.nn
+import torch.nn as nn
 import numpy as np
 from typing import List
+import gym.spaces
+import itertools
 
 from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
 from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
-import gym.spaces
-import itertools
+# Contains Helper Functions for Different Modules
 
-
+# Convert Numpy to Torch
 def torch_from_np(array: np.ndarray, device: str = 'cpu') -> torch.Tensor:
     return torch.as_tensor(np.asanyarray(array)).to(device)
 
+# Branching for Q-Values of PPO/SAC
 def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space, enable_curiosity: bool) -> torch.Tensor:
     condensed_qs = []
     one_hot_actions = actions_to_onehot(actions, action_space)
@@ -27,6 +29,7 @@ def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space, 
 
     return condensed_qs
 
+# Get probabilites and entropies of sampled actions
 def get_probs_and_entropies(acts: torch.FloatTensor, dists: List[torch.distributions.Categorical], device):
     cumulated_log_probs = torch.zeros([acts.shape[0]]).to(device)
     entropies = torch.zeros([acts.shape[0]]).to(device)
@@ -37,7 +40,7 @@ def get_probs_and_entropies(acts: torch.FloatTensor, dists: List[torch.distribut
     all_log_probs = torch.cat([torch.log(dist.probs) for dist in dists], dim=-1)
     return cumulated_log_probs, entropies, all_log_probs
 
-
+# Encode Actions to One-Hot Encoding (MultiDiscrete to Discrete Action Space)
 def actions_to_onehot(
         discrete_actions: torch.Tensor, action_size: List[int]
 ) -> List[torch.Tensor]:
@@ -73,10 +76,7 @@ def break_into_branches(
     ]
     return branched_logits
 
-import torch
-import torch.nn as nn
-
-# simply define a silu function
+# Definition of Swish activation function
 def swish(input, beta: float = 0.8):
     '''
     Applies the Sigmoid Linear Unit (SiLU) function element-wise:
@@ -110,7 +110,8 @@ class Swish(nn.Module):
         '''
         return swish(input, beta) # simply apply already implemented SiLU
 
-
+# Action Flattener for Rainbow Implementation
+# Flattens multidiscrete actions to discrete actions and backwards
 class ActionFlattener:
     """
     Flattens branched discrete action spaces into single-branch discrete action spaces.
@@ -149,7 +150,7 @@ class ActionFlattener:
         """
         return self.action_lookup[action]
 
-
+# Initialize a UnityEnvironment with the defined Environment Parameters
 def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int, random_agent: int, random_target: int, difficulty: int, agent_rot: int,
                    agent_x: int, agent_z: int, target_x: int, target_z: int, enable_heatmap: bool, enable_sight_cone: bool, base_port: int) -> UnityEnvironment:
 
