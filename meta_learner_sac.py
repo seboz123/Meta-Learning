@@ -10,12 +10,11 @@ from torch.utils.tensorboard import SummaryWriter
 from buffers import SACBuffer
 from models import ActorCriticPolicy, TorchNetworks
 from curiosity_module import CuriosityModule
-from utils import torch_from_np, break_into_branches, condense_q_stream, get_probs_and_entropies, init_unity_env
-from env_utils import step_env
+from utils import torch_from_np, break_into_branches, condense_q_stream, get_probs_and_entropies, init_unity_env, step_env
 
 flatten = lambda l: [item for sublist in l for item in sublist]
 
-# Obsolete Version own SAC Implementation
+# Obsolete Version of own SAC Implementation
 # Not used anymore in this project
 
 class SAC_Meta_Learner:

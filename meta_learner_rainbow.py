@@ -11,8 +11,7 @@ from curiosity_module import CuriosityModule
 from torch.utils.tensorboard import SummaryWriter
 
 from buffers import DQNBuffer, PrioritizedDQNBuffer
-from utils import ActionFlattener, torch_from_np, init_unity_env
-from env_utils import step_env
+from utils import ActionFlattener, torch_from_np, init_unity_env, step_env
 from models import DeepQNetwork
 
 
@@ -509,7 +508,9 @@ class RainbowMetaLearner:
 
 
 if __name__ == '__main__':
-
+    # Train Environment with Rainbow Algorithm
+    # Get Hyperparameters from cmd line
+    # Specify if no command line is used
     run_id = sys.argv[1]
     steps = int(sys.argv[2])
     buffer_size = int(sys.argv[3])
@@ -519,7 +520,7 @@ if __name__ == '__main__':
     alpha = float(sys.argv[7])
     beta = float(sys.argv[8])
 
-
+    # Result directory of Tensorboard
     writer = SummaryWriter("results/"+run_id)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -529,8 +530,11 @@ if __name__ == '__main__':
         print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
         print('Cached:   ', round(torch.cuda.memory_cached(0) / 1024 ** 3, 1), 'GB')
 
+    # Create Rainbow Learner Module
     dqn_module = RainbowMetaLearner(device=device, is_meta_learning=False)
     dqn_module.writer = writer
+
+    # Specify Unity Environment Executable
     env = init_unity_env("mMaze_dis_ref/RLProject.exe", maze_rows=3, maze_cols=3, maze_seed=0, random_agent=0, random_target=0,
                          agent_x=0, agent_z=0, target_x=2, target_z=2, enable_sight_cone=True, difficulty=0, agent_rot=0, enable_heatmap=1, base_port=np.random.randint(10, 9900))
 

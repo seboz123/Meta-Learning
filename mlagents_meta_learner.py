@@ -19,11 +19,13 @@ class MLAgentsTrainer:
         self.run_id = run_id
         self.rl_algorithm = rl_algorithm
         base_port = str(np.random.randint(1000, 10000))
+        # Start Training with PPO (set RunOptions)
         if rl_algorithm == 'ppo':
             args = parser.parse_args(["C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\tools\\ppo.yaml",
                                       "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze_cont_ref\\RLProject.exe",
                                       "--num-envs=5", "--torch", "--run-id=init", "--base-port="+base_port, "--force",
                                       "--force"])
+        # Start Training with SAC (set RunOptions)
         elif rl_algorithm == 'sac':
             args = parser.parse_args(["C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\tools\\sac.yaml",
                                       "--env=C:\\Users\\Sebastian\\Desktop\\RLUnity\\Meta-Learner\\mMaze_cont_ref\\RLProject.exe",
@@ -32,6 +34,7 @@ class MLAgentsTrainer:
         self.options = options
         # Get inital Networks and weights to Meta learn #
 
+    # Set The number of Environments by setting the RunOptions
     def set_num_envs(self, rl_algorithm: str, num_envs: int):
         base_port = str(np.random.randint(1000, 10000))
         if rl_algorithm == 'ppo':
@@ -48,6 +51,7 @@ class MLAgentsTrainer:
 
     def init_optimizer(self):
         # Initialize Optimizers
+        # Set different options -> Run Training for 100 Steps to get inital networks (no updates performed)
         max_steps = self.options.behaviors['Brain'].max_steps
         time_horizon = self.options.behaviors['Brain'].time_horizon
         self.init_lr = self.options.behaviors['Brain'].hyperparameters.learning_rate
@@ -60,7 +64,7 @@ class MLAgentsTrainer:
         self.options.checkpoint_settings.force = True
 
     def set_hyperparameters(self, hyperparameters: {}):
-        # Set Hyperprameters
+        # Set Hyperprameters by changing the RunOptions
         if self.options.behaviors['Brain'].trainer_type == self.options.behaviors['Brain'].trainer_type.PPO:
             self.options.behaviors['Brain'].hyperparameters.num_epoch = hyperparameters['num_epochs']
 
@@ -82,6 +86,7 @@ class MLAgentsTrainer:
                            random_agent: int, random_target: int, maze_seed: int, enable_sight_cone: bool,
                            enable_heatmap: bool, joint_training: bool):
         # Set Env Training Parameters (Maze_size, Position of Agent/Target, etc.)
+        # Change RunOptions
         self.options.environment_parameters['difficulty'] = EnvironmentParameterSettings(
             [Lesson(ConstantSettings(seed=0, value=float(difficulty)), "difficulty", completion_criteria=None)])
         self.options.environment_parameters['maze_rows'] = EnvironmentParameterSettings(
@@ -126,7 +131,7 @@ class MLAgentsTrainer:
                 [Lesson(ConstantSettings(seed=0, value=0.0), "joint_train", completion_criteria=None)])
 
     def train(self, task_number: int, run_id: str = "ppo_", init_networks=None, meta_eval=False):
-        # Start Inner-Loop Deep RL Training
+        # Start Inner-Loop Deep RL Training with current RunOptions
         self.options.checkpoint_settings.run_id = run_id + "_step_"+str(self.meta_step)
         print(self.options.checkpoint_settings.run_id)
         logger.debug("Configuration for this run:")
@@ -135,5 +140,6 @@ class MLAgentsTrainer:
             run_seed = np.random.randint(0, 10000)
         else:
             run_seed = self.options.env_settings.seed
+        # Get the Networks after Successful Training
         trained_networks, trained_parameters, meta_loss = run_training(run_seed=run_seed,options=self.options, init_networks=init_networks, meta_step=self.meta_step, task_number=task_number, meta_eval=meta_eval)
         return trained_networks, trained_parameters, meta_loss

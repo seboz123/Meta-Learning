@@ -16,6 +16,7 @@ def torch_from_np(array: np.ndarray, device: str = 'cpu') -> torch.Tensor:
     return torch.as_tensor(np.asanyarray(array)).to(device)
 
 # Branching for Q-Values of PPO/SAC
+# Not used right now
 def condense_q_stream(q_out: torch.Tensor, actions: torch.Tensor, action_space, enable_curiosity: bool) -> torch.Tensor:
     condensed_qs = []
     one_hot_actions = actions_to_onehot(actions, action_space)
@@ -41,6 +42,7 @@ def get_probs_and_entropies(acts: torch.FloatTensor, dists: List[torch.distribut
     return cumulated_log_probs, entropies, all_log_probs
 
 # Encode Actions to One-Hot Encoding (MultiDiscrete to Discrete Action Space)
+# Used in Rainbow Module
 def actions_to_onehot(
         discrete_actions: torch.Tensor, action_size: List[int]
 ) -> List[torch.Tensor]:
@@ -151,6 +153,9 @@ class ActionFlattener:
         return self.action_lookup[action]
 
 # Initialize a UnityEnvironment with the defined Environment Parameters
+# Used for Rainbow Meta-Learning
+
+
 def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int, random_agent: int, random_target: int, difficulty: int, agent_rot: int,
                    agent_x: int, agent_z: int, target_x: int, target_z: int, enable_heatmap: bool, enable_sight_cone: bool, base_port: int) -> UnityEnvironment:
 
@@ -177,3 +182,25 @@ def init_unity_env(env_path: str, maze_rows: int, maze_cols: int, maze_seed: int
                            side_channels=[engine_configuration_channel, env_parameters_channel])
 
     return env
+
+# Function to step the environment
+# Supports Multi-Agent Environements
+
+def step_env(env: UnityEnvironment, actions: np.array):
+    agents_transitions = {}
+    for brain in env.behavior_specs:
+        actions = np.resize(actions,
+                            (len(env.get_steps(brain)[0]), len(env.behavior_specs[brain].discrete_action_branches)))
+        env.set_actions(brain, actions)
+        env.step()
+        decision_steps, terminal_steps = env.get_steps(brain)
+
+        for agent_id_decisions in decision_steps:
+            agents_transitions[agent_id_decisions] = [decision_steps[agent_id_decisions].obs,
+                                                      decision_steps[agent_id_decisions].reward, False]
+
+        for agent_id_terminated in terminal_steps:
+            agents_transitions[agent_id_terminated] = [terminal_steps[agent_id_terminated].obs,
+                                                       terminal_steps[agent_id_terminated].reward, True]
+
+    return agents_transitions

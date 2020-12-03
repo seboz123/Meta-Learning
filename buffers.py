@@ -7,152 +7,153 @@ from segment_tree import MinSegmentTree, SumSegmentTree
 
 # Implementation of Buffers
 # SAC and PPO are obsolete and not used in this Project
+# Only Rainbow(DQN) Buffer is still used
 
-class SACBuffer:
-    def __init__(self, max_buffer_size: int, obs_space: int, action_space: Tuple):
-        self.max_buffer_size = max_buffer_size
-        self.ptr = 0
-        self.action_space = action_space
-        self.obs_space = obs_space
-
-        self.observations = np.zeros((max_buffer_size, obs_space))
-        self.actions = np.zeros((max_buffer_size, len(action_space)))
-        self.rewards = np.zeros((max_buffer_size, 2))
-        self.next_observations = np.zeros((max_buffer_size, obs_space))
-        self.done = np.zeros((max_buffer_size))
-
-    def store(self, obs: np.ndarray, acts: np.ndarray, rews: np.ndarray,
-              n_obs: np.ndarray, done: np.ndarray):
-        num_experiences = len(done)
-        self.observations[self.ptr:self.ptr + num_experiences, :] = obs
-        self.actions[self.ptr:self.ptr + num_experiences, :] = acts
-        self.rewards[self.ptr:self.ptr + num_experiences, :] = rews
-        self.next_observations[self.ptr:self.ptr + num_experiences, :] = n_obs
-        self.done[self.ptr:self.ptr + num_experiences] = done
-
-        self.ptr += num_experiences
-
-    def __len__(self):
-        return self.ptr
-
-    def remove_old_obs(self, remove_percentage: float):
-        start_indx = int(len(self) * remove_percentage)
-        self.ptr = self.ptr - start_indx
-        self.observations = np.pad(self.observations[start_indx:], [(0, start_indx), (0,0)], mode='constant', constant_values=0)
-        self.actions = np.pad(self.actions[start_indx:], [(0, start_indx), (0,0)], mode='constant', constant_values=0)
-        self.rewards = np.pad(self.rewards[start_indx:], [(0, start_indx), (0,0)], mode='constant', constant_values=0)
-        self.next_observations = np.pad(self.next_observations[start_indx:], [(0, start_indx), (0,0)], mode='constant', constant_values=0)
-        self.done = np.pad(self.done[start_indx:], [(0, start_indx)], mode='constant', constant_values=0)
-
-    def sample_batch(self, batch_size: int):
-        indx = np.arange(len(self))
-        np.random.shuffle(indx)
-        indx = indx[:batch_size]
-        batch = SACBuffer(batch_size, self.obs_space, self.action_space)
-        batch.store(self.observations[indx], self.actions[indx], self.rewards[indx],
-                         self.next_observations[indx], self.done[indx])
-
-        return batch
-
-class PPOBuffer:
-    def __init__(self, buffer_size: int, action_space: Tuple, obs_size: int):
-        self.max_buffer_size = buffer_size
-        self.action_space = action_space
-        self.obs_space = obs_size
-        self.ptr = 0
-
-        self.observations = np.zeros((buffer_size, obs_size))
-        self.actions = np.zeros((buffer_size, len(action_space)))
-        self.next_observations = np.zeros((buffer_size, obs_size))
-        self.done = np.zeros(buffer_size)
-        self.entropies = np.zeros((buffer_size, len(action_space)))
-        self.act_log_probs = np.zeros((buffer_size, len(action_space)))
-
-        self.rewards = np.zeros((buffer_size, 2))
-        self.values = np.zeros((buffer_size, 2))
-        self.advantages = np.zeros((buffer_size, 2))
-        self.returns = np.zeros((buffer_size, 2))
-
-        self.global_advantages = np.zeros(buffer_size)
-        self.global_returns = np.zeros(buffer_size)
-
-    def __len__(self):
-        return self.ptr
-
-    def store(self, obs: np.ndarray, acts: np.ndarray, rews: np.ndarray,
-              n_obs: np.ndarray, done: np.ndarray,
-              entropies: np.ndarray,
-              act_log_probs: np.ndarray, value_estimates,
-              returns, advantages, global_returns, global_advantages):
-
-        num_experiences = len(done)
-        self.observations[self.ptr:self.ptr + num_experiences, :] = obs
-        self.actions[self.ptr:self.ptr + num_experiences, :] = acts
-        self.rewards[self.ptr:self.ptr + num_experiences, :] = rews
-        self.next_observations[self.ptr:self.ptr + num_experiences, :] = n_obs
-        self.done[self.ptr:self.ptr + num_experiences] = done
-        self.entropies[self.ptr:self.ptr + num_experiences, :] = entropies
-        self.act_log_probs[self.ptr:self.ptr + num_experiences, :] = act_log_probs
-
-        self.values[self.ptr:self.ptr + num_experiences, :] = value_estimates
-        self.advantages[self.ptr:self.ptr + num_experiences, :] = advantages
-        self.returns[self.ptr:self.ptr + num_experiences, :] = returns
-
-        self.global_returns[self.ptr:self.ptr + num_experiences] = global_returns
-        self.global_advantages[self.ptr:self.ptr + num_experiences] = global_advantages
-
-
-        self.ptr += num_experiences
-
-    def split_into_batches(self, batch_size: int = 512):
-        indx = np.arange(len(self))
-        np.random.shuffle(indx)
-
-        observations = self.observations[indx]
-        actions = self.actions[indx]
-        next_observations = self.next_observations[indx]
-        done = self.done[indx]
-        entropies = self.entropies[indx]
-        act_log_probs = self.act_log_probs[indx]
-
-
-        rewards = self.rewards[indx]
-        values = self.values[indx]
-        advantages = self.advantages[indx]
-        returns = self.returns[indx]
-
-        global_advantages = self.global_advantages[indx]
-        global_returns = self.global_returns[indx]
-
-
-        batches = []
-        for size in range(0, len(self), batch_size):
-            if size + batch_size <= len(self):
-                batch = PPOBuffer(batch_size, action_space=self.action_space, obs_size=self.obs_space)
-                batch.store(obs=observations[size: size + batch_size],
-                            acts=actions[size: size + batch_size], rews=rewards[size: size + batch_size],
-                            n_obs=next_observations[size: size + batch_size], done=done[size: size + batch_size],
-                            advantages=advantages[size: size + batch_size], value_estimates=values[size: size + batch_size],
-                            act_log_probs=act_log_probs[size: size + batch_size], returns=returns[size: size + batch_size],
-                            global_advantages=global_advantages[size: size + batch_size], global_returns=global_returns[size: size + batch_size],
-                            entropies=entropies[size: size + batch_size])
-            else:
-                batch = PPOBuffer(len(self) - size, action_space=self.action_space, obs_size=self.obs_space)
-                batch.store(obs=observations[size:],
-                            acts=actions[size:],
-                            rews=rewards[size:],
-                            n_obs=next_observations[size:],
-                            done=done[size:],
-                            advantages=advantages[size:],
-                            act_log_probs=act_log_probs[size:],
-                            entropies=entropies[size:],
-                            value_estimates=values[size:],
-                            global_returns=global_returns[size:],
-                            global_advantages=global_advantages[size:],
-                            returns=returns[size:])
-
-            batches.append(batch)
-        return batches
+# class SACBuffer:
+#     def __init__(self, max_buffer_size: int, obs_space: int, action_space: Tuple):
+#         self.max_buffer_size = max_buffer_size
+#         self.ptr = 0
+#         self.action_space = action_space
+#         self.obs_space = obs_space
+#
+#         self.observations = np.zeros((max_buffer_size, obs_space))
+#         self.actions = np.zeros((max_buffer_size, len(action_space)))
+#         self.rewards = np.zeros((max_buffer_size, 2))
+#         self.next_observations = np.zeros((max_buffer_size, obs_space))
+#         self.done = np.zeros((max_buffer_size))
+#
+#     def store(self, obs: np.ndarray, acts: np.ndarray, rews: np.ndarray,
+#               n_obs: np.ndarray, done: np.ndarray):
+#         num_experiences = len(done)
+#         self.observations[self.ptr:self.ptr + num_experiences, :] = obs
+#         self.actions[self.ptr:self.ptr + num_experiences, :] = acts
+#         self.rewards[self.ptr:self.ptr + num_experiences, :] = rews
+#         self.next_observations[self.ptr:self.ptr + num_experiences, :] = n_obs
+#         self.done[self.ptr:self.ptr + num_experiences] = done
+#
+#         self.ptr += num_experiences
+#
+#     def __len__(self):
+#         return self.ptr
+#
+#     def remove_old_obs(self, remove_percentage: float):
+#         start_indx = int(len(self) * remove_percentage)
+#         self.ptr = self.ptr - start_indx
+#         self.observations = np.pad(self.observations[start_indx:], [(0, start_indx), (0,0)], mode='constant', constant_values=0)
+#         self.actions = np.pad(self.actions[start_indx:], [(0, start_indx), (0,0)], mode='constant', constant_values=0)
+#         self.rewards = np.pad(self.rewards[start_indx:], [(0, start_indx), (0,0)], mode='constant', constant_values=0)
+#         self.next_observations = np.pad(self.next_observations[start_indx:], [(0, start_indx), (0,0)], mode='constant', constant_values=0)
+#         self.done = np.pad(self.done[start_indx:], [(0, start_indx)], mode='constant', constant_values=0)
+#
+#     def sample_batch(self, batch_size: int):
+#         indx = np.arange(len(self))
+#         np.random.shuffle(indx)
+#         indx = indx[:batch_size]
+#         batch = SACBuffer(batch_size, self.obs_space, self.action_space)
+#         batch.store(self.observations[indx], self.actions[indx], self.rewards[indx],
+#                          self.next_observations[indx], self.done[indx])
+#
+#         return batch
+#
+# class PPOBuffer:
+#     def __init__(self, buffer_size: int, action_space: Tuple, obs_size: int):
+#         self.max_buffer_size = buffer_size
+#         self.action_space = action_space
+#         self.obs_space = obs_size
+#         self.ptr = 0
+#
+#         self.observations = np.zeros((buffer_size, obs_size))
+#         self.actions = np.zeros((buffer_size, len(action_space)))
+#         self.next_observations = np.zeros((buffer_size, obs_size))
+#         self.done = np.zeros(buffer_size)
+#         self.entropies = np.zeros((buffer_size, len(action_space)))
+#         self.act_log_probs = np.zeros((buffer_size, len(action_space)))
+#
+#         self.rewards = np.zeros((buffer_size, 2))
+#         self.values = np.zeros((buffer_size, 2))
+#         self.advantages = np.zeros((buffer_size, 2))
+#         self.returns = np.zeros((buffer_size, 2))
+#
+#         self.global_advantages = np.zeros(buffer_size)
+#         self.global_returns = np.zeros(buffer_size)
+#
+#     def __len__(self):
+#         return self.ptr
+#
+#     def store(self, obs: np.ndarray, acts: np.ndarray, rews: np.ndarray,
+#               n_obs: np.ndarray, done: np.ndarray,
+#               entropies: np.ndarray,
+#               act_log_probs: np.ndarray, value_estimates,
+#               returns, advantages, global_returns, global_advantages):
+#
+#         num_experiences = len(done)
+#         self.observations[self.ptr:self.ptr + num_experiences, :] = obs
+#         self.actions[self.ptr:self.ptr + num_experiences, :] = acts
+#         self.rewards[self.ptr:self.ptr + num_experiences, :] = rews
+#         self.next_observations[self.ptr:self.ptr + num_experiences, :] = n_obs
+#         self.done[self.ptr:self.ptr + num_experiences] = done
+#         self.entropies[self.ptr:self.ptr + num_experiences, :] = entropies
+#         self.act_log_probs[self.ptr:self.ptr + num_experiences, :] = act_log_probs
+#
+#         self.values[self.ptr:self.ptr + num_experiences, :] = value_estimates
+#         self.advantages[self.ptr:self.ptr + num_experiences, :] = advantages
+#         self.returns[self.ptr:self.ptr + num_experiences, :] = returns
+#
+#         self.global_returns[self.ptr:self.ptr + num_experiences] = global_returns
+#         self.global_advantages[self.ptr:self.ptr + num_experiences] = global_advantages
+#
+#
+#         self.ptr += num_experiences
+#
+#     def split_into_batches(self, batch_size: int = 512):
+#         indx = np.arange(len(self))
+#         np.random.shuffle(indx)
+#
+#         observations = self.observations[indx]
+#         actions = self.actions[indx]
+#         next_observations = self.next_observations[indx]
+#         done = self.done[indx]
+#         entropies = self.entropies[indx]
+#         act_log_probs = self.act_log_probs[indx]
+#
+#
+#         rewards = self.rewards[indx]
+#         values = self.values[indx]
+#         advantages = self.advantages[indx]
+#         returns = self.returns[indx]
+#
+#         global_advantages = self.global_advantages[indx]
+#         global_returns = self.global_returns[indx]
+#
+#
+#         batches = []
+#         for size in range(0, len(self), batch_size):
+#             if size + batch_size <= len(self):
+#                 batch = PPOBuffer(batch_size, action_space=self.action_space, obs_size=self.obs_space)
+#                 batch.store(obs=observations[size: size + batch_size],
+#                             acts=actions[size: size + batch_size], rews=rewards[size: size + batch_size],
+#                             n_obs=next_observations[size: size + batch_size], done=done[size: size + batch_size],
+#                             advantages=advantages[size: size + batch_size], value_estimates=values[size: size + batch_size],
+#                             act_log_probs=act_log_probs[size: size + batch_size], returns=returns[size: size + batch_size],
+#                             global_advantages=global_advantages[size: size + batch_size], global_returns=global_returns[size: size + batch_size],
+#                             entropies=entropies[size: size + batch_size])
+#             else:
+#                 batch = PPOBuffer(len(self) - size, action_space=self.action_space, obs_size=self.obs_space)
+#                 batch.store(obs=observations[size:],
+#                             acts=actions[size:],
+#                             rews=rewards[size:],
+#                             n_obs=next_observations[size:],
+#                             done=done[size:],
+#                             advantages=advantages[size:],
+#                             act_log_probs=act_log_probs[size:],
+#                             entropies=entropies[size:],
+#                             value_estimates=values[size:],
+#                             global_returns=global_returns[size:],
+#                             global_advantages=global_advantages[size:],
+#                             returns=returns[size:])
+#
+#             batches.append(batch)
+#         return batches
 
 
 class DQNBuffer:

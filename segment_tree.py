@@ -4,6 +4,7 @@
 import operator
 from typing import Callable
 
+# Segment Tree for Prioritized Replay Buffer of Rainbow
 
 class SegmentTree:
     """ Create SegmentTree.

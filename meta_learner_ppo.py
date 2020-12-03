@@ -11,11 +11,11 @@ from curiosity_module import CuriosityModule
 from utils import torch_from_np, get_probs_and_entropies, init_unity_env
 from buffers import PPOBuffer
 from models import ActorCriticPolicy
-from env_utils import step_env
+from utils import step_env
 
 flatten = lambda l: [item for sublist in l for item in sublist]
 
-# Obsolte Version of own PPO Implementation
+# Obsolete Version of own PPO Implementation
 # Not used anymore in this Project
 
 class PPO_Meta_Learner:
